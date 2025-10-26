@@ -6,7 +6,7 @@ use local_aws_secret_manager::{
 };
 use sqlx::sqlite::SqlitePoolOptions;
 
-use aws_config::{BehaviorVersion, Region, SdkConfig};
+use aws_config::{BehaviorVersion, Region, SdkConfig, retry::RetryConfig};
 use aws_sdk_secretsmanager::config::{Credentials, SharedCredentialsProvider};
 use tokio::task::AbortHandle;
 
