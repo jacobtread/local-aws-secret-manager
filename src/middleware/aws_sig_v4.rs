@@ -1,8 +1,14 @@
-use crate::utils::aws_sig_v4::{aws_sig_v4, create_canonical_request};
+use crate::{
+    handlers::error::{
+        AwsErrorResponse, IncompleteSignature, InvalidClientTokenId, InvalidRequestException,
+        MissingAuthenticationToken, SignatureDoesNotMatch,
+    },
+    utils::aws_sig_v4::{aws_sig_v4, create_canonical_request},
+};
 use axum::{
     body::Body,
     http::{Request, header::AUTHORIZATION},
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use http_body_util::BodyExt;
 use std::{mem::swap, pin::Pin, sync::Arc};
@@ -77,11 +83,13 @@ where
                 Some(value) => match value.to_str() {
                     Ok(value) => value,
                     // Invalid auth header
-                    Err(_) => return todo!(),
+                    Err(_) => {
+                        return Ok(AwsErrorResponse(InvalidRequestException).into_response());
+                    }
                 },
                 None => {
                     // Unauthorized missing header
-                    return todo!();
+                    return Ok(AwsErrorResponse(MissingAuthenticationToken).into_response());
                 }
             };
 
@@ -89,19 +97,20 @@ where
                 Some(value) => match value.to_str() {
                     Ok(value) => value,
                     // Invalid date header
-                    Err(_) => return todo!(),
+                    Err(_) => {
+                        return Ok(AwsErrorResponse(InvalidRequestException).into_response());
+                    }
                 },
                 None => {
                     // Missing date header
-                    return todo!();
+                    return Ok(AwsErrorResponse(InvalidRequestException).into_response());
                 }
             };
 
             let auth = match parse_auth_header(authorization) {
                 Ok(value) => value,
-                Err(error) => {
-                    // Invalid header
-                    return todo!();
+                Err(_) => {
+                    return Ok(AwsErrorResponse(IncompleteSignature).into_response());
                 }
             };
 
@@ -109,49 +118,49 @@ where
             let access_key_id = match credentials_parts.next() {
                 Some(value) => value,
                 None => {
-                    return todo!();
+                    return Ok(AwsErrorResponse(IncompleteSignature).into_response());
                 }
             };
 
             let date_yyyymmdd = match credentials_parts.next() {
                 Some(value) => value,
                 None => {
-                    return todo!();
+                    return Ok(AwsErrorResponse(IncompleteSignature).into_response());
                 }
             };
 
             let region = match credentials_parts.next() {
                 Some(value) => value,
                 None => {
-                    return todo!();
+                    return Ok(AwsErrorResponse(IncompleteSignature).into_response());
                 }
             };
 
             let service = match credentials_parts.next() {
                 Some(value) => value,
                 None => {
-                    return todo!();
+                    return Ok(AwsErrorResponse(IncompleteSignature).into_response());
                 }
             };
 
-            _ = match credentials_parts.next() {
-                // assert = aws4_request
-                Some(value) => value,
-                None => {
-                    return todo!();
-                }
-            };
+            // Missing the aws4_request portion of the credential
+            if credentials_parts
+                .next()
+                .is_none_or(|value| value != "aws4_request")
+            {
+                return Ok(AwsErrorResponse(IncompleteSignature).into_response());
+            }
 
             if access_key_id != credential.access_key_id {
                 // Invalid access key
-                return todo!();
+                return Ok(AwsErrorResponse(InvalidClientTokenId).into_response());
             }
 
             let body = match body.collect().await {
                 Ok(value) => value.to_bytes(),
-                Err(error) => {
+                Err(_) => {
                     // Failed to ready body
-                    return todo!();
+                    return Ok(AwsErrorResponse(InvalidRequestException).into_response());
                 }
             };
 
@@ -167,7 +176,7 @@ where
 
             if signature != auth.signature {
                 // Verify failure, bad signature
-                return todo!();
+                return Ok(AwsErrorResponse(SignatureDoesNotMatch).into_response());
             }
 
             // Re-create the body since we consumed the previous one

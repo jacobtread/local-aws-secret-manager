@@ -12,7 +12,10 @@ use crate::{
             mark_secret_versions_previous, update_secret_description,
         },
     },
-    handlers::{Handler, error::ResourceNotFoundException},
+    handlers::{
+        Handler,
+        error::{AwsErrorResponse, ResourceNotFoundException},
+    },
 };
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecret.html
@@ -52,7 +55,7 @@ impl Handler for UpdateSecretHandler {
         let secret = get_secret_latest_version(db, &secret_id).await.unwrap();
         let secret = match secret {
             Some(value) => value,
-            None => return Err(ResourceNotFoundException.into_response()),
+            None => return Err(AwsErrorResponse(ResourceNotFoundException).into_response()),
         };
 
         let mut t = db.begin().await.unwrap();

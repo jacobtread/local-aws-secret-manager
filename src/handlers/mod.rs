@@ -4,7 +4,7 @@ use crate::{
         create_secret::CreateSecretHandler,
         delete_secret::DeleteSecretHandler,
         describe_secret::DescribeSecretHandler,
-        error::{InternalServiceError, NotImplemented},
+        error::{AwsErrorResponse, InternalServiceError, NotImplemented},
         get_secret_value::GetSecretValueHandler,
         list_secrets::ListSecretsHandler,
         put_secret_value::PutSecretValueHandler,
@@ -119,13 +119,13 @@ impl Service<Request<Body>> for HandlerRouterService {
                 Ok(value) => value.to_bytes(),
                 Err(error) => {
                     tracing::error!(?error, "failed to collect bytes");
-                    return Ok(InternalServiceError.into_response());
+                    return Ok(AwsErrorResponse(InternalServiceError).into_response());
                 }
             };
 
             Ok(match handler {
                 Some(value) => value.handle(db, &body).await,
-                None => NotImplemented.into_response(),
+                None => AwsErrorResponse(NotImplemented).into_response(),
             })
         })
     }

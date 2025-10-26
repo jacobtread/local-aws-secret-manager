@@ -13,7 +13,10 @@ use crate::{
     },
     handlers::{
         Handler, Tag,
-        error::{InternalServiceError, InvalidRequestException, ResourceExistsException},
+        error::{
+            AwsErrorResponse, InternalServiceError, InvalidRequestException,
+            ResourceExistsException,
+        },
     },
 };
 
@@ -62,14 +65,14 @@ impl Handler for CreateSecretHandler {
         let tags = request.tags.unwrap_or_default();
 
         if request.secret_string.is_none() && request.secret_binary.is_none() {
-            return Err(InvalidRequestException.into_response());
+            return Err(AwsErrorResponse(InvalidRequestException).into_response());
         }
 
         let mut t = match db.begin().await {
             Ok(value) => value,
             Err(error) => {
                 tracing::error!(?error, %name, "failed to begin transaction");
-                return Err(InternalServiceError.into_response());
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
 
@@ -92,7 +95,7 @@ impl Handler for CreateSecretHandler {
                     Ok(value) => value,
                     Err(error) => {
                         tracing::error!(?error, %name, "failed to determine existing version");
-                        return Err(InternalServiceError.into_response());
+                        return Err(AwsErrorResponse(InternalServiceError).into_response());
                     }
                 };
 
@@ -106,11 +109,11 @@ impl Handler for CreateSecretHandler {
                 }
 
                 // Tried to create a secret that already exists (And wasn't a matching version on the existing one)
-                return Err(ResourceExistsException.into_response());
+                return Err(AwsErrorResponse(ResourceExistsException).into_response());
             }
 
             tracing::error!(?error, %name, "failed to create secret");
-            return Err(InternalServiceError.into_response());
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
         // Create the initial secret version
@@ -138,20 +141,20 @@ impl Handler for CreateSecretHandler {
             }
 
             tracing::error!(?error, %name, "failed to create secret");
-            return Err(InternalServiceError.into_response());
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
         // Attach all the secrets
         for tag in tags {
             if let Err(error) = put_secret_tag(t.deref_mut(), &arn, &tag.key, &tag.value).await {
                 tracing::error!(?error, "failed to set secret tag");
-                return Err(InternalServiceError.into_response());
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         }
 
         if let Err(error) = t.commit().await {
             tracing::error!(?error, %name, "failed to commit transaction");
-            return Err(InternalServiceError.into_response());
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
         Ok(CreateSecretResponse {

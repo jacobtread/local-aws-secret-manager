@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     database::DbPool,
-    handlers::{Handler, error::NotImplemented},
+    handlers::{
+        Handler,
+        error::{AwsErrorResponse, NotImplemented},
+    },
 };
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_DescribeSecret.html
@@ -20,6 +23,6 @@ impl Handler for DescribeSecretHandler {
     type Response = DescribeSecretResponse;
 
     async fn handle(_db: &DbPool, _request: Self::Request) -> Result<Self::Response, Response> {
-        Err(NotImplemented.into_response())
+        Err(AwsErrorResponse(NotImplemented).into_response())
     }
 }

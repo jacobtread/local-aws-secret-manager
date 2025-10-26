@@ -10,7 +10,10 @@ use crate::{
             update_secret_version_last_accessed,
         },
     },
-    handlers::{Handler, error::ResourceNotFoundException},
+    handlers::{
+        Handler,
+        error::{AwsErrorResponse, ResourceNotFoundException},
+    },
 };
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
@@ -76,7 +79,7 @@ impl Handler for GetSecretValueHandler {
 
         let secret = match secret {
             Some(value) => value,
-            None => return Err(ResourceNotFoundException.into_response()),
+            None => return Err(AwsErrorResponse(ResourceNotFoundException).into_response()),
         };
 
         update_secret_version_last_accessed(db, &secret.arn, &secret.version_id)
