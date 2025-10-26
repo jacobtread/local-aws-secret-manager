@@ -4,10 +4,12 @@ use std::{error::Error, net::SocketAddr};
 use tower_http::trace::TraceLayer;
 
 use crate::{
+    background::perform_background_tasks,
     config::Config,
     middleware::aws_sig_v4::{AwsCredential, AwsSigV4AuthLayer},
 };
 
+mod background;
 mod config;
 mod database;
 mod handlers;
@@ -59,16 +61,15 @@ async fn server() -> Result<(), Box<dyn Error>> {
     let app = Router::new()
         .route_service("/", post_service(handlers_service))
         .layer(AwsSigV4AuthLayer::new(credentials))
-        .layer(Extension(db))
+        .layer(Extension(db.clone()))
         .layer(TraceLayer::new_for_http());
 
     // Development mode CORS access for local browser testing
     #[cfg(debug_assertions)]
     let app = app.layer(tower_http::cors::CorsLayer::very_permissive());
 
-    // TODO: Background task runner to handle deletions of expired secrets
-    // - Every hours delete any secret versions past the 100th version provided they are older than 24h (Oldest first)
-    // - Delete any entires that have past "scheduled_delete_at"
+    // Spawn the background task runner
+    tokio::spawn(perform_background_tasks(db.clone()));
 
     let handle = axum_server::Handle::default();
 

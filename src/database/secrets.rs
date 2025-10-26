@@ -31,6 +31,7 @@ pub struct StoredSecret {
 
 #[derive(Clone, FromRow)]
 pub struct SecretVersion {
+    pub secret_arn: String,
     //
     pub version_id: String,
     #[sqlx(try_from = "String")]
@@ -108,6 +109,15 @@ pub async fn update_secret_description(
 pub async fn delete_secret(db: impl DbExecutor<'_>, secret_arn: &str) -> DbResult<()> {
     sqlx::query(r#"DELETE FROM "secrets" WHERE "secret_arn" = ?"#)
         .bind(secret_arn)
+        .execute(db)
+        .await?;
+
+    Ok(())
+}
+
+/// Delete all secrets that have past their "scheduled_delete_at" date
+pub async fn delete_scheduled_secrets(db: impl DbExecutor<'_>) -> DbResult<()> {
+    sqlx::query(r#"DELETE FROM "secrets" WHERE "scheduled_delete_at" < datetime('now')"#)
         .execute(db)
         .await?;
 
@@ -422,4 +432,33 @@ pub async fn get_secret_versions(
     .bind(secret_arn)
     .fetch_all(db)
     .await
+}
+
+/// Takes any secrets with over 100 versions and deletes any secrets that
+/// are over 24h old until there is only 100 versions for each secret
+pub async fn delete_excess_secret_versions(db: impl DbExecutor<'_>) -> DbResult<()> {
+    sqlx::query(
+        r#"
+        WITH "ranked_versions" AS (
+            SELECT
+                "secret_version".*,
+                ROW_NUMBER() OVER (
+                    PARTITION BY "secret_version"."secret_arn"
+                    ORDER BY "secret_version"."created_at" DESC
+                ) AS "row_number"
+            FROM "secret_versions" "secret_version"
+        )
+        DELETE FROM "secret_versions" "secret_version"
+        WHERE ("secret_arn", "version_id") IN (
+            SELECT "secret_arn", "version_id"
+            FROM "ranked_versions"
+            WHERE "row_number" > 100
+              AND datetime("created_at", '+1 day') < datetime('now')
+        );
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    Ok(())
 }
