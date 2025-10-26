@@ -123,6 +123,11 @@ impl Handler for PutSecretValueHandler {
             if let Some(error) = error.as_database_error()
                 && error.is_unique_violation()
             {
+                // Must rollback the transaction before attempting to use the connection
+                if let Err(error) = t.rollback().await {
+                    tracing::error!(?error, "failed to rollback transaction");
+                }
+
                 // Check if the secret has been created
                 let secret = match get_secret_by_version_id(db, &secret.arn, &version_id).await {
                     Ok(value) => value,

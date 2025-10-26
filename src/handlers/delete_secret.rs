@@ -11,7 +11,6 @@ use crate::{
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::ops::DerefMut;
 
 /// https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_DeleteSecret.html
 pub struct DeleteSecretHandler;
@@ -59,24 +58,15 @@ impl Handler for DeleteSecretHandler {
             None => return Err(AwsErrorResponse(ResourceNotFoundException).into_response()),
         };
 
-        let mut t = match db.begin().await {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::error!(?error, name = %secret.name, "failed to begin transaction");
-                return Err(AwsErrorResponse(InternalServiceError).into_response());
-            }
-        };
-
         let deletion_date = if force_delete_without_recovery {
-            if let Err(error) = delete_secret(t.deref_mut(), &secret.arn).await {
+            if let Err(error) = delete_secret(db, &secret.arn).await {
                 tracing::error!(?error, %secret_id, "failed to delete secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
 
             Utc::now()
         } else {
-            match schedule_delete_secret(t.deref_mut(), &secret.arn, recovery_window_in_days).await
-            {
+            match schedule_delete_secret(db, &secret.arn, recovery_window_in_days).await {
                 Ok(value) => value,
                 Err(error) => {
                     tracing::error!(?error, %secret_id, "failed to mark secret for deletion");
@@ -84,11 +74,6 @@ impl Handler for DeleteSecretHandler {
                 }
             }
         };
-
-        if let Err(error) = t.commit().await {
-            tracing::error!(?error, name = %secret.name,  "failed to commit transaction");
-            return Err(AwsErrorResponse(InternalServiceError).into_response());
-        }
 
         Ok(DeleteSecretResponse {
             arn: secret.arn,

@@ -75,6 +75,11 @@ impl Handler for UpdateSecretHandler {
             && let Err(error) =
                 update_secret_description(t.deref_mut(), &secret.arn, &description).await
         {
+            // Rollback the transaction on failure
+            if let Err(error) = t.rollback().await {
+                tracing::error!(?error, "failed to rollback transaction");
+            }
+
             tracing::error!(?error, name = %secret.name, "failed to update secret version description");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
@@ -87,6 +92,11 @@ impl Handler for UpdateSecretHandler {
 
             // Mark previous versions as non current
             if let Err(error) = mark_secret_versions_previous(t.deref_mut(), &secret.arn).await {
+                // Rollback the transaction on failure
+                if let Err(error) = t.rollback().await {
+                    tracing::error!(?error, "failed to rollback transaction");
+                }
+
                 tracing::error!(?error, name = %secret.name, "failed to mark other secret versions as previous");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
@@ -113,6 +123,11 @@ impl Handler for UpdateSecretHandler {
                         name: secret.name,
                         version_id: None,
                     });
+                }
+
+                // Rollback the transaction on failure
+                if let Err(error) = t.rollback().await {
+                    tracing::error!(?error, "failed to rollback transaction");
                 }
 
                 tracing::error!(?error, name = %secret.name, "failed to create secret version");

@@ -61,6 +61,11 @@ impl Handler for UntagResourceHandler {
         // Attach all the secrets
         for key in tag_keys {
             if let Err(error) = remove_secret_tag(t.deref_mut(), &secret.arn, &key).await {
+                // Rollback the transaction on failure
+                if let Err(error) = t.rollback().await {
+                    tracing::error!(?error, "failed to rollback transaction");
+                }
+
                 tracing::error!(?error, "failed to remove secret tag");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }

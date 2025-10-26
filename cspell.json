@@ -12,6 +12,7 @@
     "itertools",
     "thiserror",
     "indexmap",
-    "strftime"
+    "strftime",
+    "chrono"
   ]
 }

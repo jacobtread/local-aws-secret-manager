@@ -63,6 +63,11 @@ impl Handler for TagResourceHandler {
             if let Err(error) =
                 put_secret_tag(t.deref_mut(), &secret.arn, &tag.key, &tag.value).await
             {
+                // Rollback the transaction on failure
+                if let Err(error) = t.rollback().await {
+                    tracing::error!(?error, "failed to rollback transaction");
+                }
+
                 tracing::error!(?error, "failed to set secret tag");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }

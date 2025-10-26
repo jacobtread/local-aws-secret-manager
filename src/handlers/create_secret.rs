@@ -89,6 +89,11 @@ impl Handler for CreateSecretHandler {
             if let Some(error) = error.as_database_error()
                 && error.is_unique_violation()
             {
+                // Must rollback the transaction before attempting to use the connection
+                if let Err(error) = t.rollback().await {
+                    tracing::error!(?error, "failed to rollback transaction");
+                }
+
                 // Check if the secret has been created
                 let secret = match get_secret_by_version_id(db, &arn, &version_id).await {
                     Ok(value) => value,
@@ -139,6 +144,11 @@ impl Handler for CreateSecretHandler {
                 });
             }
 
+            // Rollback the transaction on failure
+            if let Err(error) = t.rollback().await {
+                tracing::error!(?error, "failed to rollback transaction");
+            }
+
             tracing::error!(?error, %name, "failed to create secret version");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
@@ -146,6 +156,11 @@ impl Handler for CreateSecretHandler {
         // Attach all the secrets
         for tag in tags {
             if let Err(error) = put_secret_tag(t.deref_mut(), &arn, &tag.key, &tag.value).await {
+                // Rollback the transaction on failure
+                if let Err(error) = t.rollback().await {
+                    tracing::error!(?error, "failed to rollback transaction");
+                }
+
                 tracing::error!(?error, "failed to set secret tag");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
