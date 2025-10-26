@@ -4,7 +4,7 @@ use crate::{
         create_secret::CreateSecretHandler,
         delete_secret::DeleteSecretHandler,
         describe_secret::DescribeSecretHandler,
-        error::{AwsErrorResponse, InternalServiceError, NotImplemented},
+        error::{AwsErrorResponse, InternalServiceError, InvalidRequestException, NotImplemented},
         get_secret_value::GetSecretValueHandler,
         list_secrets::ListSecretsHandler,
         put_secret_value::PutSecretValueHandler,
@@ -103,12 +103,16 @@ impl Service<Request<Body>> for HandlerRouterService {
                 .get::<DbPool>()
                 .expect("handler router service missing db pool");
 
-            let target = parts
+            let target = match parts
                 .headers
                 .get("x-amz-target")
                 .and_then(|v| v.to_str().ok())
-                // TODO: Handle missing target
-                .unwrap();
+            {
+                Some(value) => value,
+                None => {
+                    return Ok(AwsErrorResponse(InvalidRequestException).into_response());
+                }
+            };
 
             let authorization = parts.headers.get("authorization");
             tracing::debug!(?authorization);
@@ -164,7 +168,14 @@ impl<H: Handler> ErasedHandler for HandlerBase<H> {
         request: &'r [u8],
     ) -> Pin<Box<dyn Future<Output = Response> + Send + 'r>> {
         Box::pin(async move {
-            let request: H::Request = serde_json::from_slice(request).unwrap();
+            let request: H::Request = match serde_json::from_slice(request) {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::error!(?error, "failed to parse request");
+                    return AwsErrorResponse(InvalidRequestException).into_response();
+                }
+            };
+
             match H::handle(db, request).await {
                 Ok(response) => Json(response).into_response(),
                 Err(error) => error,
