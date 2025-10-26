@@ -8,6 +8,7 @@ use crate::{
         get_secret_value::GetSecretValueHandler,
         list_secrets::ListSecretsHandler,
         put_secret_value::PutSecretValueHandler,
+        restore_secret::RestoreSecretHandler,
         update_secret::UpdateSecretHandler,
     },
 };
@@ -29,6 +30,7 @@ pub mod error;
 pub mod get_secret_value;
 pub mod list_secrets;
 pub mod put_secret_value;
+pub mod restore_secret;
 pub mod update_secret;
 
 pub fn create_handlers() -> HandlerRouter {
@@ -40,6 +42,7 @@ pub fn create_handlers() -> HandlerRouter {
         .add_handler("secretsmanager.ListSecrets", ListSecretsHandler)
         .add_handler("secretsmanager.PutSecretValue", PutSecretValueHandler)
         .add_handler("secretsmanager.UpdateSecret", UpdateSecretHandler)
+        .add_handler("secretsmanager.RestoreSecret", RestoreSecretHandler)
 }
 
 #[derive(Deserialize, Serialize)]

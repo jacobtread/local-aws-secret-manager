@@ -139,6 +139,25 @@ pub async fn schedule_delete_secret(
     Ok(date)
 }
 
+/// Cancel a secrets deletion
+pub async fn cancel_delete_secret(db: impl DbExecutor<'_>, secret_arn: &str) -> DbResult<()> {
+    sqlx::query(
+        r#"
+        UPDATE "secrets"
+        SET
+            "deleted_at" = NULL,
+            "scheduled_delete_at" = NULL
+        WHERE "secret_arn" = ?
+        RETURNING "scheduled_delete_at"
+        "#,
+    )
+    .bind(secret_arn)
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
 /// Set a tag on a secret
 pub async fn put_secret_tag(
     db: impl DbExecutor<'_>,

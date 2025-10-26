@@ -13,7 +13,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::ops::DerefMut;
 
-// https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_DeleteSecret.html
+/// https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_DeleteSecret.html
 pub struct DeleteSecretHandler;
 
 #[derive(Deserialize)]
