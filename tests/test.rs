@@ -1,9 +1,6 @@
 mod common;
 
 #[tokio::test]
-async fn test_create_secret() {}
-
-#[tokio::test]
 async fn test_delete_secret() {}
 
 #[tokio::test]

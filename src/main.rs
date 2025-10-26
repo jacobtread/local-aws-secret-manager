@@ -11,10 +11,10 @@ use crate::{
 
 mod background;
 mod config;
-mod database;
-mod handlers;
+pub mod database;
+pub mod handlers;
 mod logging;
-mod middleware;
+pub mod middleware;
 mod utils;
 
 fn main() -> Result<(), Box<dyn Error>> {
