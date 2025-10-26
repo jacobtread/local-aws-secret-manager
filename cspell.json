@@ -6,6 +6,10 @@
     "errortype",
     "sqlx",
     "AWSCURRENT",
-    "AWSPREVIOUS"
+    "AWSPREVIOUS",
+    "hmac",
+    "splitn",
+    "itertools",
+    "thiserror"
   ]
 }

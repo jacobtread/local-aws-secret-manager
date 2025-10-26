@@ -24,12 +24,20 @@ pub struct Config {
 
     pub certificate_path: String,
     pub private_key_path: String,
+    pub access_key_id: String,
+    pub access_key_secret: String,
 }
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("Must specify SM_ENCRYPTION_KEY environment variable")]
     MissingEncryptionKey,
+
+    #[error("Must specify SM_ACCESS_KEY_ID environment variable")]
+    MissingAccessKeyId,
+
+    #[error("Must specify SM_ACCESS_KEY_SECRET environment variable")]
+    MissingAccessKeySecret,
 
     #[error("SM_USE_HTTPS must be either true or false")]
     InvalidUseHttps,
@@ -39,6 +47,12 @@ impl Config {
     pub fn from_env() -> Result<Config, ConfigError> {
         let encryption_key =
             std::env::var("SM_ENCRYPTION_KEY").map_err(|_| ConfigError::MissingEncryptionKey)?;
+
+        let access_key_id =
+            std::env::var("SM_ACCESS_KEY_ID").map_err(|_| ConfigError::MissingAccessKeyId)?;
+
+        let access_key_secret = std::env::var("SM_ACCESS_KEY_SECRET")
+            .map_err(|_| ConfigError::MissingAccessKeySecret)?;
 
         let database_path =
             std::env::var("SM_DATABASE_PATH").unwrap_or_else(|_| "secrets.db".to_string());
@@ -76,6 +90,8 @@ impl Config {
             server_address,
             certificate_path,
             private_key_path,
+            access_key_id,
+            access_key_secret,
         })
     }
 }

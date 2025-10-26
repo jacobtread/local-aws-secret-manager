@@ -93,7 +93,6 @@ impl Service<Request<Body>> for HandlerRouterService {
     ) -> std::task::Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
-
     fn call(&mut self, req: Request<Body>) -> Self::Future {
         let handlers = self.router.clone();
         Box::pin(async move {
@@ -110,6 +109,9 @@ impl Service<Request<Body>> for HandlerRouterService {
                 .and_then(|v| v.to_str().ok())
                 // TODO: Handle missing target
                 .unwrap();
+
+            let authorization = parts.headers.get("authorization");
+            tracing::debug!(?authorization);
 
             let handler = handlers.get_handler(target);
 

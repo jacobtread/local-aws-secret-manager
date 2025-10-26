@@ -3,12 +3,17 @@ use axum_server::tls_rustls::RustlsConfig;
 use std::{error::Error, net::SocketAddr};
 use tower_http::trace::TraceLayer;
 
-use crate::config::Config;
+use crate::{
+    config::Config,
+    middleware::aws_sig_v4::{AwsCredential, AwsSigV4AuthLayer},
+};
 
 mod config;
 mod database;
 mod handlers;
 mod logging;
+mod middleware;
+mod utils;
 
 fn main() -> Result<(), Box<dyn Error>> {
     _ = dotenvy::dotenv();
@@ -38,6 +43,11 @@ async fn server() -> Result<(), Box<dyn Error>> {
         }
     };
 
+    let credentials = AwsCredential {
+        access_key_id: config.access_key_id,
+        access_key_secret: config.access_key_secret,
+    };
+
     // Setup database
     let db = database::create_database(config.encryption_key, config.database_path).await?;
 
@@ -48,6 +58,7 @@ async fn server() -> Result<(), Box<dyn Error>> {
     // Setup router
     let app = Router::new()
         .route_service("/", post_service(handlers_service))
+        .layer(AwsSigV4AuthLayer::new(credentials))
         .layer(Extension(db))
         .layer(TraceLayer::new_for_http());
 
