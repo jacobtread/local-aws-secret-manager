@@ -10,6 +10,7 @@ use crate::{
         put_secret_value::PutSecretValueHandler,
         restore_secret::RestoreSecretHandler,
         tag_resource::TagResourceHandler,
+        untag_resource::UntagResourceHandler,
         update_secret::UpdateSecretHandler,
     },
 };
@@ -33,6 +34,7 @@ pub mod list_secrets;
 pub mod put_secret_value;
 pub mod restore_secret;
 pub mod tag_resource;
+pub mod untag_resource;
 pub mod update_secret;
 
 pub fn create_handlers() -> HandlerRouter {
@@ -46,6 +48,7 @@ pub fn create_handlers() -> HandlerRouter {
         .add_handler("secretsmanager.UpdateSecret", UpdateSecretHandler)
         .add_handler("secretsmanager.RestoreSecret", RestoreSecretHandler)
         .add_handler("secretsmanager.TagResource", TagResourceHandler)
+        .add_handler("secretsmanager.UntagResource", UntagResourceHandler)
 }
 
 #[derive(Deserialize, Serialize)]
