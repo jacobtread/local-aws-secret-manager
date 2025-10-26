@@ -2,4 +2,4 @@
 
 > WIP
 
-Local encrypted JSON file backed aws secrets manager compatible server
+Local aws secrets manager compatible server backed by an SQLCipher encrypted SQLite database

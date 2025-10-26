@@ -1,5 +1,14 @@
 use crate::{
-    json::{JsonSecretManager, JsonSecretManagerConfig, Secret, SecretValue},
+    database::{
+        DbPool, create_database,
+        secrets::{
+            CreateSecret, CreateSecretVersion, VersionStage, create_secret, create_secret_version,
+            get_secret_by_version_id, get_secret_by_version_stage,
+            get_secret_by_version_stage_and_id, get_secret_latest_version,
+            mark_secret_versions_previous, put_secret_tag, update_secret_description,
+            update_secret_version_last_accessed,
+        },
+    },
     logging::init_logging,
 };
 use axum::{
@@ -10,15 +19,17 @@ use axum::{
 };
 use axum_server::tls_rustls::RustlsConfig;
 use bytes::Bytes;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     error::Error,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    ops::DerefMut,
 };
 use tower_http::trace::TraceLayer;
+use uuid::Uuid;
 
-mod json;
+mod database;
 mod logging;
 
 /// Default server address when not specified (HTTP)
@@ -34,7 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     init_logging();
 
-    tokio::runtime::Builder::new_multi_thread()
+    tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("Failed building the Runtime")
@@ -49,11 +60,21 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn server() -> Result<(), Box<dyn Error>> {
-    let secrets = JsonSecretManager::from_config(JsonSecretManagerConfig::from_env()?);
+    // Encryption key
+    let encryption_key = std::env::var("SM_ENCRYPTION_KEY").inspect_err(|_| {
+        tracing::error!("Must specify SM_ENCRYPTION_KEY environment variable");
+    })?;
+
+    // Path to the database file
+    let database_path =
+        std::env::var("SM_DATABASE_PATH").unwrap_or_else(|_| "secrets.db".to_string());
+
+    // Connect to or create an encrypted database file
+    let pool = create_database(encryption_key, database_path).await?;
 
     // Setup router
     let app = router()
-        .layer(Extension(secrets))
+        .layer(Extension(pool))
         .layer(TraceLayer::new_for_http());
 
     // Determine whether to use https
@@ -143,14 +164,60 @@ pub fn router() -> Router {
 struct CreateSecretRequest {
     #[serde(rename = "Name")]
     name: String,
+    #[serde(rename = "Description")]
+    description: Option<String>,
+    #[serde(rename = "ClientRequestToken")]
+    client_request_token: Option<String>,
     #[serde(rename = "SecretString")]
     secret_string: Option<String>,
     #[serde(rename = "SecretBinary")]
     secret_binary: Option<Vec<u8>>,
+    #[serde(rename = "Tags")]
+    tags: Option<Vec<Tag>>,
+}
+
+#[derive(Serialize)]
+struct CreatedSecretResponse {
+    #[serde(rename = "ARN")]
+    arn: String,
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "VersionId")]
+    version_id: String,
+}
+
+#[derive(Deserialize)]
+struct PutSecretValueRequest {
+    #[serde(rename = "ClientRequestToken")]
+    client_request_token: Option<String>,
+    #[serde(rename = "SecretId")]
+    secret_id: String,
+    #[serde(rename = "SecretString")]
+    secret_string: Option<String>,
+    #[serde(rename = "SecretBinary")]
+    secret_binary: Option<Vec<u8>>,
+    #[serde(rename = "VersionStages")]
+    version_stages: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct PutSecretValueResponse {
+    #[serde(rename = "ARN")]
+    arn: String,
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "VersionId")]
+    version_id: String,
+    #[serde(rename = "VersionStages")]
+    version_stages: Vec<VersionStage>,
 }
 
 #[derive(Deserialize)]
 struct UpdateSecretRequest {
+    #[serde(rename = "ClientRequestToken")]
+    client_request_token: Option<String>,
+    #[serde(rename = "Description")]
+    description: Option<String>,
     #[serde(rename = "SecretId")]
     secret_id: String,
     #[serde(rename = "SecretString")]
@@ -159,14 +226,54 @@ struct UpdateSecretRequest {
     secret_binary: Option<Vec<u8>>,
 }
 
+#[derive(Serialize)]
+struct UpdateSecretResponse {
+    #[serde(rename = "ARN")]
+    arn: String,
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "VersionId")]
+    version_id: Option<String>,
+}
+
 #[derive(Deserialize)]
-struct GetSecretRequest {
+struct Tag {
+    #[serde(rename = "Key")]
+    key: String,
+    #[serde(rename = "Value")]
+    value: String,
+}
+
+#[derive(Deserialize)]
+struct GetSecretValueRequest {
     #[serde(rename = "SecretId")]
     secret_id: String,
+    #[serde(rename = "VersionId")]
+    version_id: Option<String>,
+    #[serde(rename = "VersionStage")]
+    version_stage: Option<String>,
+}
+
+#[derive(Serialize)]
+struct GetSecretValueResponse {
+    #[serde(rename = "ARN")]
+    arn: String,
+    #[serde(rename = "CreatedDate")]
+    created_date: i64,
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "SecretString")]
+    secret_string: Option<String>,
+    #[serde(rename = "SecretBinary")]
+    secret_binary: Option<Vec<u8>>,
+    #[serde(rename = "VersionId")]
+    version_id: String,
+    #[serde(rename = "VersionStages")]
+    version_stages: Vec<VersionStage>,
 }
 
 async fn handle_post(
-    Extension(secrets): Extension<JsonSecretManager>,
+    Extension(db): Extension<DbPool>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -181,28 +288,63 @@ async fn handle_post(
         "secretsmanager.CreateSecret" => {
             let request: CreateSecretRequest = serde_json::from_slice(&body).unwrap();
 
-            let arn = format!(
-                "arn:aws:secretsmanager:us-east-1:1:secret:{}",
-                &request.name
-            );
+            let tags = request.tags.unwrap_or_default();
+            let name = request.name;
+            let arn = format!("arn:aws:secretsmanager:us-east-1:1:secret:{name}");
 
-            let secret_value = match (request.secret_string, request.secret_binary) {
-                (Some(value), _) => SecretValue::String(value),
-                (_, Some(value)) => SecretValue::Binary(value),
-                _ => todo!("missing secret"),
-            };
+            let version_id = request
+                .client_request_token
+                // Generate a new version ID if none was provided
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-            let secret = Secret {
-                value: secret_value,
-            };
+            if request.secret_string.is_none() && request.secret_binary.is_none() {
+                todo!("missing secret error")
+            }
 
-            secrets.set_secret(&request.name, secret).await.unwrap();
+            let mut t = db.begin().await.unwrap();
 
-            (Json(json!({
-                "ARN": arn,
-                "Name": request.name,
-            })),)
-                .into_response()
+            // Create the secret
+            create_secret(
+                t.deref_mut(),
+                CreateSecret {
+                    arn: arn.clone(),
+                    name: name.clone(),
+                    description: request.description,
+                },
+            )
+            .await
+            .unwrap();
+            // TODO: Check for unique constraint violation
+
+            // Create the initial secret version
+            create_secret_version(
+                t.deref_mut(),
+                CreateSecretVersion {
+                    secret_arn: arn.clone(),
+                    version_id: version_id.clone(),
+                    version_stage: database::secrets::VersionStage::Current,
+                    secret_string: request.secret_string,
+                    secret_binary: request.secret_binary,
+                },
+            )
+            .await
+            .unwrap();
+
+            // Attach all the secrets
+            for tag in tags {
+                put_secret_tag(t.deref_mut(), &arn, &tag.key, &tag.value)
+                    .await
+                    .unwrap();
+            }
+
+            t.commit().await.unwrap();
+
+            Json(CreatedSecretResponse {
+                arn,
+                name,
+                version_id,
+            })
+            .into_response()
         }
 
         // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_DeleteSecret.html
@@ -213,77 +355,189 @@ async fn handle_post(
 
         // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
         "secretsmanager.GetSecretValue" => {
-            let request: GetSecretRequest = serde_json::from_slice(&body).unwrap();
-            let arn = format!(
-                "arn:aws:secretsmanager:us-east-1:1:secret:{}",
-                &request.secret_id
-            );
+            let request: GetSecretValueRequest = serde_json::from_slice(&body).unwrap();
 
-            // TODO: Handle get by ARN
+            let secret_id = request.secret_id;
+            let version_id = request.version_id;
+            let version_stage = request
+                .version_stage
+                .map(VersionStage::try_from)
+                .transpose()
+                .expect("todo: handle unknown version stage");
 
-            match secrets.get_secret(&request.secret_id).await.unwrap() {
-                Some(secret) => match secret.value {
-                    json::SecretValue::String(secret) => Json(json!({
-                        "ARN": arn,
-                        "Name": &request.secret_id,
-                        "SecretString": secret,
-                        "SecretBinary": serde_json::Value::Null,
-                    }))
-                    .into_response(),
-                    json::SecretValue::Binary(items) => Json(json!({
-                        "ARN": arn,
-                        "Name": &request.secret_id,
-                        "SecretString": serde_json::Value::Null,
-                        "SecretBinary": items
-                    }))
-                    .into_response(),
-                },
-                None => Json(json!({
-                    "ARN": arn,
-                    "Name": &request.secret_id,
-                    "SecretString": serde_json::Value::Null,
-                    "SecretBinary": serde_json::Value::Null,
-                }))
-                .into_response(),
-            }
+            let secret = match (&version_id, version_stage) {
+                (None, None) => get_secret_latest_version(&db, &secret_id).await.unwrap(),
+                (Some(version_id), Some(version_stage)) => {
+                    get_secret_by_version_stage_and_id(&db, &secret_id, version_id, version_stage)
+                        .await
+                        .unwrap()
+                }
+                (Some(version_id), None) => get_secret_by_version_id(&db, &secret_id, version_id)
+                    .await
+                    .unwrap(),
+                (None, Some(version_stage)) => {
+                    get_secret_by_version_stage(&db, &secret_id, version_stage)
+                        .await
+                        .unwrap()
+                }
+            };
+
+            let secret = match secret {
+                Some(value) => value,
+                None => return not_found_response(),
+            };
+
+            update_secret_version_last_accessed(&db, &secret.arn, &secret.version_id)
+                .await
+                .unwrap();
+
+            let created_at = if version_id.is_some() {
+                secret.version_created_at
+            } else {
+                secret.created_at
+            };
+
+            Json(GetSecretValueResponse {
+                arn: secret.arn,
+                created_date: created_at.timestamp(),
+                name: secret.name,
+                secret_string: secret.secret_string,
+                secret_binary: secret.secret_binary,
+                version_id: secret.version_id,
+                version_stages: vec![secret.version_stage],
+            })
+            .into_response()
         }
 
         // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_ListSecrets.html
         "secretsmanager.ListSecrets" => not_implemented_response(),
 
         // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_PutSecretValue.html
-        "secretsmanager.PutSecretValue" => not_implemented_response(),
+        "secretsmanager.PutSecretValue" => {
+            let request: PutSecretValueRequest = serde_json::from_slice(&body).unwrap();
+
+            let version_id = request
+                .client_request_token
+                // Generate a new version ID if none was provided
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+            let version_stages: Vec<VersionStage> = request
+                .version_stages
+                .into_iter()
+                // TODO: Handle unsupported?
+                .filter_map(|version| VersionStage::try_from(version).ok())
+                .collect();
+
+            let version_stage = version_stages
+                .first()
+                .copied()
+                .unwrap_or(VersionStage::Current);
+
+            if request.secret_string.is_none() && request.secret_binary.is_none() {
+                todo!("missing secret error")
+            }
+
+            let secret_id = request.secret_id;
+
+            let secret = get_secret_latest_version(&db, &secret_id).await.unwrap();
+            let secret = match secret {
+                Some(value) => value,
+                None => return not_found_response(),
+            };
+
+            let mut t = db.begin().await.unwrap();
+
+            if matches!(version_stage, VersionStage::Current) {
+                // Mark previous versions as non current
+                mark_secret_versions_previous(t.deref_mut(), &secret.arn)
+                    .await
+                    .unwrap();
+            }
+
+            // Create the initial secret version
+            create_secret_version(
+                t.deref_mut(),
+                CreateSecretVersion {
+                    secret_arn: secret.arn.clone(),
+                    version_id: version_id.clone(),
+                    version_stage,
+                    secret_string: request.secret_string,
+                    secret_binary: request.secret_binary,
+                },
+            )
+            .await
+            .unwrap();
+
+            t.commit().await.unwrap();
+
+            // TODO: Handle unique constraint violation for version ID
+
+            Json(PutSecretValueResponse {
+                arn: secret.arn,
+                name: secret.name,
+                version_id: secret.version_id,
+                version_stages: vec![secret.version_stage],
+            })
+            .into_response()
+        }
 
         // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecret.html
         "secretsmanager.UpdateSecret" => {
             let request: UpdateSecretRequest = serde_json::from_slice(&body).unwrap();
 
-            // TODO: Handle get by ARN
+            let secret_id = request.secret_id;
 
-            let arn = format!(
-                "arn:aws:secretsmanager:us-east-1:1:secret:{}",
-                &request.secret_id
-            );
-
-            let secret_value = match (request.secret_string, request.secret_binary) {
-                (Some(value), _) => SecretValue::String(value),
-                (_, Some(value)) => SecretValue::Binary(value),
-                _ => todo!("missing secret"),
+            let secret = get_secret_latest_version(&db, &secret_id).await.unwrap();
+            let secret = match secret {
+                Some(value) => value,
+                None => return not_found_response(),
             };
 
-            let secret = Secret {
-                value: secret_value,
-            };
+            let mut t = db.begin().await.unwrap();
 
-            secrets
-                .set_secret(&request.secret_id, secret)
+            if let Some(description) = request.description {
+                update_secret_description(t.deref_mut(), &secret.arn, &description)
+                    .await
+                    .unwrap();
+            }
+
+            let version_id = if request.secret_string.is_some() || request.secret_binary.is_some() {
+                let version_id = request
+                    .client_request_token
+                    // Generate a new version ID if none was provided
+                    .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+                // Mark previous versions as non current
+                mark_secret_versions_previous(t.deref_mut(), &secret.arn)
+                    .await
+                    .unwrap();
+
+                // Create a new current secret version
+                create_secret_version(
+                    t.deref_mut(),
+                    CreateSecretVersion {
+                        secret_arn: secret.arn.clone(),
+                        version_id: version_id.clone(),
+                        version_stage: VersionStage::Current,
+                        secret_string: request.secret_string,
+                        secret_binary: request.secret_binary,
+                    },
+                )
                 .await
                 .unwrap();
 
-            Json(json!({
-                "ARN": arn,
-                "Name": request.secret_id,
-            }))
+                Some(version_id)
+            } else {
+                None
+            };
+
+            t.commit().await.unwrap();
+
+            Json(UpdateSecretResponse {
+                arn: secret.arn,
+                name: secret.name,
+                version_id,
+            })
             .into_response()
         }
 
@@ -300,7 +554,21 @@ fn not_implemented_response() -> Response {
     let mut response = (StatusCode::NOT_IMPLEMENTED, Json(body)).into_response();
     response.headers_mut().insert(
         "x-amzn-errortype",
-        HeaderValue::from_static("NotImplementedException"),
+        HeaderValue::from_static("NotImplemented"),
+    );
+    response
+}
+
+fn not_found_response() -> Response {
+    let body = json!({
+        "__type": "ResourceNotFoundException",
+        "message": "Secrets Manager can't find the resource that you asked for."
+    });
+
+    let mut response = (StatusCode::BAD_REQUEST, Json(body)).into_response();
+    response.headers_mut().insert(
+        "x-amzn-errortype",
+        HeaderValue::from_static("ResourceNotFoundException"),
     );
     response
 }
