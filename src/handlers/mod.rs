@@ -123,9 +123,6 @@ impl Service<Request<Body>> for HandlerRouterService {
                 }
             };
 
-            let authorization = parts.headers.get("authorization");
-            tracing::debug!(?authorization);
-
             let handler = handlers.get_handler(target);
 
             let body = match body.collect().await {
