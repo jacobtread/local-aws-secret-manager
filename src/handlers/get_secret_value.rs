@@ -40,7 +40,7 @@ pub struct GetSecretValueResponse {
     #[serde(rename = "SecretString")]
     secret_string: Option<String>,
     #[serde(rename = "SecretBinary")]
-    secret_binary: Option<Vec<u8>>,
+    secret_binary: Option<String>,
     #[serde(rename = "VersionId")]
     version_id: String,
     #[serde(rename = "VersionStages")]

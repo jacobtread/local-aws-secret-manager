@@ -8,13 +8,16 @@ use crate::{
     database::{
         DbPool,
         secrets::{
-            CreateSecretVersion, VersionStage, create_secret_version, get_secret_latest_version,
-            mark_secret_versions_previous,
+            CreateSecretVersion, VersionStage, create_secret_version, get_secret_by_version_id,
+            get_secret_latest_version, mark_secret_versions_previous,
         },
     },
     handlers::{
         Handler,
-        error::{AwsErrorResponse, ResourceNotFoundException},
+        error::{
+            AwsErrorResponse, InternalServiceError, InvalidRequestException,
+            ResourceExistsException, ResourceNotFoundException,
+        },
     },
 };
 
@@ -30,7 +33,7 @@ pub struct PutSecretValueRequest {
     #[serde(rename = "SecretString")]
     secret_string: Option<String>,
     #[serde(rename = "SecretBinary")]
-    secret_binary: Option<Vec<u8>>,
+    secret_binary: Option<String>,
     #[serde(rename = "VersionStages")]
     version_stages: Vec<String>,
 }
@@ -70,7 +73,7 @@ impl Handler for PutSecretValueHandler {
             .unwrap_or(VersionStage::Current);
 
         if request.secret_string.is_none() && request.secret_binary.is_none() {
-            todo!("missing secret error")
+            return Err(AwsErrorResponse(InvalidRequestException).into_response());
         }
 
         let secret_id = request.secret_id;
@@ -81,30 +84,80 @@ impl Handler for PutSecretValueHandler {
             None => return Err(AwsErrorResponse(ResourceNotFoundException).into_response()),
         };
 
-        let mut t = db.begin().await.unwrap();
+        let mut t = match db.begin().await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(?error, name = %secret.name, "failed to begin transaction");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+        };
 
         if matches!(version_stage, VersionStage::Current) {
             // Mark previous versions as non current
-            mark_secret_versions_previous(t.deref_mut(), &secret.arn)
-                .await
-                .unwrap();
+            if let Err(error) = mark_secret_versions_previous(t.deref_mut(), &secret.arn).await {
+                tracing::error!(?error, name = %secret.name, "failed to mark other secret versions as previous");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
         }
 
-        // Create the initial secret version
-        create_secret_version(
+        // Create the new secret version
+        if let Err(error) = create_secret_version(
             t.deref_mut(),
             CreateSecretVersion {
                 secret_arn: secret.arn.clone(),
                 version_id: version_id.clone(),
                 version_stage,
-                secret_string: request.secret_string,
-                secret_binary: request.secret_binary,
+                secret_string: request.secret_string.clone(),
+                secret_binary: request.secret_binary.clone(),
             },
         )
         .await
-        .unwrap();
+        {
+            if let Some(error) = error.as_database_error()
+                && error.is_unique_violation()
+            {
+                // Check if the secret has been created
+                let secret = match get_secret_by_version_id(db, &secret.arn, &version_id).await {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::error!(?error, name = %secret.name,"failed to determine existing version");
+                        return Err(AwsErrorResponse(InternalServiceError).into_response());
+                    }
+                };
 
-        t.commit().await.unwrap();
+                let secret = match secret {
+                    Some(value) => value,
+                    None => {
+                        // Shouldn't be possible if we hit the unique violation
+                        return Err(AwsErrorResponse(InternalServiceError).into_response());
+                    }
+                };
+
+                // If the stored version data doesn't match this is an error that
+                // the resource already exists
+                if request.secret_string.ne(&request.secret_string)
+                    || secret.secret_binary.ne(&request.secret_binary)
+                {
+                    return Err(AwsErrorResponse(ResourceExistsException).into_response());
+                }
+
+                // Another request already created this version
+                return Ok(PutSecretValueResponse {
+                    arn: secret.arn,
+                    name: secret.name,
+                    version_id: secret.version_id,
+                    version_stages: vec![secret.version_stage],
+                });
+            }
+
+            tracing::error!(?error, name = %secret.name, "failed to create secret version");
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
+        }
+
+        if let Err(error) = t.commit().await {
+            tracing::error!(?error, name = %secret.name,  "failed to commit transaction");
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
+        }
 
         Ok(PutSecretValueResponse {
             arn: secret.arn,

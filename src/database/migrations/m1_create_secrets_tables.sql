@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS "secrets_versions" (
 
     -- Secret Value
     "secret_string" TEXT NULL,
-    "secret_binary" BLOB NULL,
+    "secret_binary" TEXT NULL,
 
     -- Timestamps
     "created_at" DATETIME NOT NULL,

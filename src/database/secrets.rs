@@ -20,7 +20,7 @@ pub struct StoredSecret {
     //
     pub description: Option<String>,
     pub secret_string: Option<String>,
-    pub secret_binary: Option<Vec<u8>>,
+    pub secret_binary: Option<String>,
     //
     pub version_created_at: DateTime<Utc>,
     pub version_last_accessed_at: Option<DateTime<Utc>>,
@@ -165,7 +165,7 @@ pub struct CreateSecretVersion {
     pub version_stage: VersionStage,
     //
     pub secret_string: Option<String>,
-    pub secret_binary: Option<Vec<u8>>,
+    pub secret_binary: Option<String>,
 }
 
 /// Creates a new version of a secret

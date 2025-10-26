@@ -67,6 +67,8 @@ async fn server() -> Result<(), Box<dyn Error>> {
     let app = app.layer(tower_http::cors::CorsLayer::very_permissive());
 
     // TODO: Background task runner to handle deletions of expired secrets
+    // - Every hours delete any secret versions past the 100th version provided they are older than 24h (Oldest first)
+    // - Delete any entires that have past "scheduled_delete_at"
 
     let handle = axum_server::Handle::default();
 

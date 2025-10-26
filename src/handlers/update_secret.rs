@@ -30,7 +30,7 @@ pub struct UpdateSecretRequest {
     #[serde(rename = "SecretString")]
     secret_string: Option<String>,
     #[serde(rename = "SecretBinary")]
-    secret_binary: Option<Vec<u8>>,
+    secret_binary: Option<String>,
 }
 
 #[derive(Serialize)]
