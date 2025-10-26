@@ -1,8 +1,3 @@
-use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
-use std::ops::DerefMut;
-use uuid::Uuid;
-
 use crate::{
     database::{
         DbPool,
@@ -19,6 +14,10 @@ use crate::{
         },
     },
 };
+use axum::response::{IntoResponse, Response};
+use serde::{Deserialize, Serialize};
+use std::ops::DerefMut;
+use uuid::Uuid;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_CreateSecret.html
 pub struct CreateSecretHandler;
@@ -140,7 +139,7 @@ impl Handler for CreateSecretHandler {
                 });
             }
 
-            tracing::error!(?error, %name, "failed to create secret");
+            tracing::error!(?error, %name, "failed to create secret version");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 

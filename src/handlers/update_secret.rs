@@ -1,9 +1,3 @@
-use std::ops::DerefMut;
-
-use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     database::{
         DbPool,
@@ -14,9 +8,13 @@ use crate::{
     },
     handlers::{
         Handler,
-        error::{AwsErrorResponse, ResourceNotFoundException},
+        error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
     },
 };
+use axum::response::{IntoResponse, Response};
+use serde::{Deserialize, Serialize};
+use std::ops::DerefMut;
+use uuid::Uuid;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecret.html
 pub struct UpdateSecretHandler;
@@ -58,12 +56,20 @@ impl Handler for UpdateSecretHandler {
             None => return Err(AwsErrorResponse(ResourceNotFoundException).into_response()),
         };
 
-        let mut t = db.begin().await.unwrap();
+        let mut t = match db.begin().await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(?error, name = %secret.name, "failed to begin transaction");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+        };
 
-        if let Some(description) = request.description {
-            update_secret_description(t.deref_mut(), &secret.arn, &description)
-                .await
-                .unwrap();
+        if let Some(description) = request.description
+            && let Err(error) =
+                update_secret_description(t.deref_mut(), &secret.arn, &description).await
+        {
+            tracing::error!(?error, name = %secret.name, "failed to update secret version description");
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
         let version_id = if request.secret_string.is_some() || request.secret_binary.is_some() {
@@ -73,12 +79,13 @@ impl Handler for UpdateSecretHandler {
                 .unwrap_or_else(|| Uuid::new_v4().to_string());
 
             // Mark previous versions as non current
-            mark_secret_versions_previous(t.deref_mut(), &secret.arn)
-                .await
-                .unwrap();
+            if let Err(error) = mark_secret_versions_previous(t.deref_mut(), &secret.arn).await {
+                tracing::error!(?error, name = %secret.name, "failed to mark other secret versions as previous");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
 
             // Create a new current secret version
-            create_secret_version(
+            if let Err(error) = create_secret_version(
                 t.deref_mut(),
                 CreateSecretVersion {
                     secret_arn: secret.arn.clone(),
@@ -89,14 +96,32 @@ impl Handler for UpdateSecretHandler {
                 },
             )
             .await
-            .unwrap();
+            {
+                if let Some(error) = error.as_database_error()
+                    && error.is_unique_violation()
+                {
+                    // Another request already created this version
+                    return Ok(UpdateSecretResponse {
+                        arn: secret.arn,
+                        name: secret.name,
+                        version_id: None,
+                    });
+                }
+
+                tracing::error!(?error, name = %secret.name, "failed to create secret version");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
 
             Some(version_id)
         } else {
+            // Nothing to update
             None
         };
 
-        t.commit().await.unwrap();
+        if let Err(error) = t.commit().await {
+            tracing::error!(?error, name = %secret.name,  "failed to commit transaction");
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
+        }
 
         Ok(UpdateSecretResponse {
             arn: secret.arn,
