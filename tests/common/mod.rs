@@ -1,5 +1,5 @@
 use axum::{Extension, Router, routing::post_service};
-use local_aws_secret_manager::{
+use loker::{
     database::{DbPool, initialize_database},
     handlers::{self},
     middleware::aws_sig_v4::{AwsCredential, AwsSigV4AuthLayer},
