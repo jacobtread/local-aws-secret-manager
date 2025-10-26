@@ -104,7 +104,7 @@ pub async fn update_secret_description(
     Ok(())
 }
 
-/// Remove a tag from a secret
+/// Remove a secret
 pub async fn delete_secret(db: impl DbExecutor<'_>, secret_arn: &str) -> DbResult<()> {
     sqlx::query(r#"DELETE FROM "secrets" WHERE "secret_arn" = ?"#)
         .bind(secret_arn)
@@ -112,6 +112,31 @@ pub async fn delete_secret(db: impl DbExecutor<'_>, secret_arn: &str) -> DbResul
         .await?;
 
     Ok(())
+}
+
+/// Mark a secret for deletion, sets the scheduled deletion date for `days` days
+/// into the future
+pub async fn schedule_delete_secret(
+    db: impl DbExecutor<'_>,
+    secret_arn: &str,
+    days: i32,
+) -> DbResult<DateTime<Utc>> {
+    let (date,): (DateTime<Utc>,) = sqlx::query_as(
+        r#"
+        UPDATE "secrets"
+        SET
+            "deleted_at" = datetime('now'),
+            "scheduled_delete_at" = datetime('now', '+' || ? || ' days')
+        WHERE "secret_arn" = ?
+        RETURNING "scheduled_delete_at"
+        "#,
+    )
+    .bind(days)
+    .bind(secret_arn)
+    .fetch_one(db)
+    .await?;
+
+    Ok(date)
 }
 
 /// Set a tag on a secret
