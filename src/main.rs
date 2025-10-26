@@ -9,6 +9,7 @@ use crate::{
             update_secret_version_last_accessed,
         },
     },
+    handlers::create_secret::{CreateSecretRequest, handle_create_secret},
     logging::init_logging,
 };
 use axum::{
@@ -30,6 +31,7 @@ use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
 mod database;
+mod handlers;
 mod logging;
 
 /// Default server address when not specified (HTTP)
@@ -161,32 +163,6 @@ pub fn router() -> Router {
 }
 
 #[derive(Deserialize)]
-struct CreateSecretRequest {
-    #[serde(rename = "Name")]
-    name: String,
-    #[serde(rename = "Description")]
-    description: Option<String>,
-    #[serde(rename = "ClientRequestToken")]
-    client_request_token: Option<String>,
-    #[serde(rename = "SecretString")]
-    secret_string: Option<String>,
-    #[serde(rename = "SecretBinary")]
-    secret_binary: Option<Vec<u8>>,
-    #[serde(rename = "Tags")]
-    tags: Option<Vec<Tag>>,
-}
-
-#[derive(Serialize)]
-struct CreatedSecretResponse {
-    #[serde(rename = "ARN")]
-    arn: String,
-    #[serde(rename = "Name")]
-    name: String,
-    #[serde(rename = "VersionId")]
-    version_id: String,
-}
-
-#[derive(Deserialize)]
 struct PutSecretValueRequest {
     #[serde(rename = "ClientRequestToken")]
     client_request_token: Option<String>,
@@ -284,67 +260,12 @@ async fn handle_post(
         .unwrap();
 
     match target {
-        // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_CreateSecret.html
         "secretsmanager.CreateSecret" => {
             let request: CreateSecretRequest = serde_json::from_slice(&body).unwrap();
-
-            let tags = request.tags.unwrap_or_default();
-            let name = request.name;
-            let arn = format!("arn:aws:secretsmanager:us-east-1:1:secret:{name}");
-
-            let version_id = request
-                .client_request_token
-                // Generate a new version ID if none was provided
-                .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-            if request.secret_string.is_none() && request.secret_binary.is_none() {
-                todo!("missing secret error")
+            match handle_create_secret(&db, request).await {
+                Ok(response) => Json(response).into_response(),
+                Err(response) => response,
             }
-
-            let mut t = db.begin().await.unwrap();
-
-            // Create the secret
-            create_secret(
-                t.deref_mut(),
-                CreateSecret {
-                    arn: arn.clone(),
-                    name: name.clone(),
-                    description: request.description,
-                },
-            )
-            .await
-            .unwrap();
-            // TODO: Check for unique constraint violation
-
-            // Create the initial secret version
-            create_secret_version(
-                t.deref_mut(),
-                CreateSecretVersion {
-                    secret_arn: arn.clone(),
-                    version_id: version_id.clone(),
-                    version_stage: database::secrets::VersionStage::Current,
-                    secret_string: request.secret_string,
-                    secret_binary: request.secret_binary,
-                },
-            )
-            .await
-            .unwrap();
-
-            // Attach all the secrets
-            for tag in tags {
-                put_secret_tag(t.deref_mut(), &arn, &tag.key, &tag.value)
-                    .await
-                    .unwrap();
-            }
-
-            t.commit().await.unwrap();
-
-            Json(CreatedSecretResponse {
-                arn,
-                name,
-                version_id,
-            })
-            .into_response()
         }
 
         // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_DeleteSecret.html
