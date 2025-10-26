@@ -59,6 +59,24 @@ impl IntoResponse for ResourceExistsException {
     }
 }
 
+pub struct NotImplemented;
+
+impl IntoResponse for NotImplemented {
+    fn into_response(self) -> axum::response::Response {
+        let body = json!({
+            "__type": "NotImplemented",
+            "message": "This operation is not implemented in this server"
+        });
+
+        let mut response = (StatusCode::NOT_IMPLEMENTED, Json(body)).into_response();
+        response.headers_mut().insert(
+            "x-amzn-errortype",
+            HeaderValue::from_static("NotImplemented"),
+        );
+        response
+    }
+}
+
 pub struct InternalServiceError;
 
 impl IntoResponse for InternalServiceError {
