@@ -1,0 +1,81 @@
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use thiserror::Error;
+
+/// Default server address when not specified (HTTP)
+const DEFAULT_SERVER_ADDRESS_HTTP: SocketAddr =
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 8080));
+
+/// Default server address when not specified (HTTPS)
+const DEFAULT_SERVER_ADDRESS_HTTPS: SocketAddr =
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 8443));
+
+pub struct Config {
+    /// Encryption key to encrypt and decrypt the database
+    pub encryption_key: String,
+
+    /// Path to the server database file
+    pub database_path: String,
+
+    /// Whether to use HTTPS instead of HTTP
+    pub use_https: bool,
+
+    /// Server address to bind against
+    pub server_address: SocketAddr,
+
+    pub certificate_path: String,
+    pub private_key_path: String,
+}
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("Must specify SM_ENCRYPTION_KEY environment variable")]
+    MissingEncryptionKey,
+
+    #[error("SM_USE_HTTPS must be either true or false")]
+    InvalidUseHttps,
+}
+
+impl Config {
+    pub fn from_env() -> Result<Config, ConfigError> {
+        let encryption_key =
+            std::env::var("SM_ENCRYPTION_KEY").map_err(|_| ConfigError::MissingEncryptionKey)?;
+
+        let database_path =
+            std::env::var("SM_DATABASE_PATH").unwrap_or_else(|_| "secrets.db".to_string());
+
+        let use_https = match std::env::var("SM_USE_HTTPS") {
+            Ok(value) => value
+                .parse::<bool>()
+                .map_err(|_| ConfigError::InvalidUseHttps)?,
+            Err(_) => false,
+        };
+
+        let server_address = std::env::var("SERVER_ADDRESS")
+            .ok()
+            .and_then(|value| value.parse::<SocketAddr>().ok())
+            .unwrap_or(if use_https {
+                DEFAULT_SERVER_ADDRESS_HTTPS
+            } else {
+                DEFAULT_SERVER_ADDRESS_HTTP
+            });
+
+        let certificate_path = match std::env::var("SM_HTTPS_CERTIFICATE_PATH") {
+            Ok(value) => value,
+            Err(_) => "sm.cert.pem".to_string(),
+        };
+
+        let private_key_path = match std::env::var("SM_HTTPS_PRIVATE_KEY_PATH") {
+            Ok(value) => value,
+            Err(_) => "sm.key.pem".to_string(),
+        };
+
+        Ok(Config {
+            encryption_key,
+            database_path,
+            use_https,
+            server_address,
+            certificate_path,
+            private_key_path,
+        })
+    }
+}

@@ -1,10 +1,26 @@
-use crate::database::DbPool;
+use crate::{
+    database::DbPool,
+    handlers::{
+        create_secret::CreateSecretHandler,
+        delete_secret::DeleteSecretHandler,
+        describe_secret::DescribeSecretHandler,
+        error::{InternalServiceError, NotImplemented},
+        get_secret_value::GetSecretValueHandler,
+        list_secrets::ListSecretsHandler,
+        put_secret_value::PutSecretValueHandler,
+        update_secret::UpdateSecretHandler,
+    },
+};
 use axum::{
     Json,
+    body::Body,
+    http::Request,
     response::{IntoResponse, Response},
 };
+use http_body_util::BodyExt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{collections::HashMap, pin::Pin};
+use std::{collections::HashMap, convert::Infallible, pin::Pin, sync::Arc, task::Poll};
+use tower::Service;
 
 pub mod create_secret;
 pub mod delete_secret;
@@ -14,6 +30,17 @@ pub mod get_secret_value;
 pub mod list_secrets;
 pub mod put_secret_value;
 pub mod update_secret;
+
+pub fn create_handlers() -> HandlerRouter {
+    HandlerRouter::default()
+        .add_handler("secretsmanager.CreateSecret", CreateSecretHandler)
+        .add_handler("secretsmanager.DeleteSecret", DeleteSecretHandler)
+        .add_handler("secretsmanager.DescribeSecret", DescribeSecretHandler)
+        .add_handler("secretsmanager.GetSecretValue", GetSecretValueHandler)
+        .add_handler("secretsmanager.ListSecrets", ListSecretsHandler)
+        .add_handler("secretsmanager.PutSecretValue", PutSecretValueHandler)
+        .add_handler("secretsmanager.UpdateSecret", UpdateSecretHandler)
+}
 
 #[derive(Deserialize)]
 struct Tag {
@@ -40,6 +67,66 @@ impl HandlerRouter {
     pub fn get_handler(&self, target: &str) -> Option<&dyn ErasedHandler> {
         self.handlers.get(target).map(|value| value.as_ref())
     }
+
+    pub fn into_service(self) -> HandlerRouterService {
+        HandlerRouterService {
+            router: Arc::new(self),
+        }
+    }
+}
+
+/// Service that handles routing AWS handler requests
+#[derive(Clone)]
+pub struct HandlerRouterService {
+    router: Arc<HandlerRouter>,
+}
+
+impl Service<Request<Body>> for HandlerRouterService {
+    type Response = Response;
+    type Error = Infallible;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+        let handlers = self.router.clone();
+        Box::pin(async move {
+            let (parts, body) = req.into_parts();
+
+            let db = parts
+                .extensions
+                .get::<DbPool>()
+                .expect("handler router service missing db pool");
+
+            let target = parts
+                .headers
+                .get("x-amz-target")
+                .and_then(|v| v.to_str().ok())
+                // TODO: Handle missing target
+                .unwrap();
+
+            let handler = handlers.get_handler(target);
+
+            let body = match body.collect().await {
+                Ok(value) => value.to_bytes(),
+                Err(error) => {
+                    tracing::error!(?error, "failed to collect bytes");
+                    return Ok(InternalServiceError.into_response());
+                }
+            };
+
+            Ok(match handler {
+                Some(value) => value.handle(db, &body).await,
+                None => NotImplemented.into_response(),
+            })
+        })
+    }
 }
 
 pub trait Handler: Send + Sync + 'static {
@@ -52,6 +139,8 @@ pub trait Handler: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Self::Response, Response>> + Send + 'd;
 }
 
+/// Associated type erased [Handler] that takes a generic request and provides
+/// a generic response
 pub trait ErasedHandler: Send + Sync + 'static {
     fn handle<'r>(
         &self,
@@ -60,6 +149,8 @@ pub trait ErasedHandler: Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = Response> + Send + 'r>>;
 }
 
+/// Handler that takes care of the process of deserializing the request
+/// type and serializing the response type to create a generic [ErasedHandler]
 pub struct HandlerBase<H: Handler> {
     _handler: H,
 }
