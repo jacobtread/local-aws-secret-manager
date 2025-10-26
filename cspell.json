@@ -11,6 +11,7 @@
     "splitn",
     "itertools",
     "thiserror",
-    "indexmap"
+    "indexmap",
+    "strftime"
   ]
 }
