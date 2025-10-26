@@ -1,28 +1,129 @@
-use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
-
 use crate::{
-    database::DbPool,
+    database::{
+        DbPool,
+        secrets::{VersionStage, get_secret_latest_version, get_secret_versions},
+    },
     handlers::{
-        Handler,
-        error::{AwsErrorResponse, NotImplemented},
+        Handler, Tag,
+        error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
     },
 };
+use axum::response::{IntoResponse, Response};
+use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_DescribeSecret.html
 pub struct DescribeSecretHandler;
 
 #[derive(Deserialize)]
-pub struct DescribeSecretRequest {}
+pub struct DescribeSecretRequest {
+    #[serde(rename = "SecretId")]
+    secret_id: String,
+}
 
 #[derive(Serialize)]
-pub struct DescribeSecretResponse {}
+pub struct DescribeSecretResponse {
+    #[serde(rename = "ARN")]
+    arn: String,
+    #[serde(rename = "CreatedDate")]
+    created_date: i64,
+    #[serde(rename = "DeletedDate")]
+    deleted_date: Option<i64>,
+    #[serde(rename = "KmsKeyId")]
+    kms_key_id: Option<String>,
+    #[serde(rename = "LastAccessedDate")]
+    last_accessed_date: Option<i64>,
+    #[serde(rename = "LastChangedDate")]
+    last_changed_date: Option<i64>,
+    #[serde(rename = "LastRotatedDate")]
+    last_rotated_date: Option<i64>,
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "NextRotationDate")]
+    next_rotation_date: Option<i64>,
+    #[serde(rename = "OwningService")]
+    owning_service: Option<String>,
+    #[serde(rename = "PrimaryRegion")]
+    primary_region: Option<String>,
+    #[serde(rename = "ReplicationStatus")]
+    replication_status: Option<Vec<serde_json::Value>>,
+    #[serde(rename = "RotationEnabled")]
+    rotation_enabled: bool,
+    #[serde(rename = "RotationLambdaARN")]
+    rotation_lambda_arn: Option<String>,
+    #[serde(rename = "RotationRules")]
+    rotation_rules: Option<serde_json::Value>,
+    #[serde(rename = "Tags")]
+    tags: Vec<Tag>,
+    #[serde(rename = "VersionIdsToStages")]
+    version_ids_to_stages: IndexMap<String, Vec<VersionStage>>,
+}
 
 impl Handler for DescribeSecretHandler {
     type Request = DescribeSecretRequest;
     type Response = DescribeSecretResponse;
 
-    async fn handle(_db: &DbPool, _request: Self::Request) -> Result<Self::Response, Response> {
-        Err(AwsErrorResponse(NotImplemented).into_response())
+    async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
+        let secret_id = request.secret_id;
+
+        let secret = match get_secret_latest_version(db, &secret_id).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(?error, %secret_id, "failed to get secret");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+        };
+
+        let secret = match secret {
+            Some(value) => value,
+            None => return Err(AwsErrorResponse(ResourceNotFoundException).into_response()),
+        };
+
+        let versions = match get_secret_versions(db, &secret.arn).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(?error, %secret_id, "failed to get secret versions");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+        };
+
+        let most_recently_used = versions
+            .iter()
+            .filter_map(|version| version.last_accessed_at)
+            .max();
+
+        let last_changed_date = versions.iter().map(|version| version.created_at).max();
+
+        let version_ids_to_stages = versions
+            .iter()
+            .map(|version| (version.version_id.clone(), vec![version.version_stage]))
+            .collect();
+
+        Ok(DescribeSecretResponse {
+            arn: secret.arn,
+            created_date: secret.created_at.timestamp(),
+            deleted_date: secret.delete_at.map(|value| value.timestamp()),
+            kms_key_id: None,
+            last_accessed_date: most_recently_used.map(|value| value.timestamp()),
+            last_changed_date: last_changed_date.map(|value| value.timestamp()),
+            last_rotated_date: None,
+            name: secret.name,
+            next_rotation_date: None,
+            owning_service: None,
+            primary_region: None,
+            replication_status: None,
+            rotation_enabled: false,
+            rotation_lambda_arn: None,
+            rotation_rules: None,
+            tags: secret
+                .version_tags
+                .into_iter()
+                .map(|tag| Tag {
+                    key: tag.key,
+                    value: tag.value,
+                })
+                .collect(),
+            version_ids_to_stages,
+        })
     }
 }

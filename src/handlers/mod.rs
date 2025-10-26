@@ -42,7 +42,7 @@ pub fn create_handlers() -> HandlerRouter {
         .add_handler("secretsmanager.UpdateSecret", UpdateSecretHandler)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct Tag {
     #[serde(rename = "Key")]
     key: String,

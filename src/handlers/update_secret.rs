@@ -50,7 +50,14 @@ impl Handler for UpdateSecretHandler {
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let secret_id = request.secret_id;
 
-        let secret = get_secret_latest_version(db, &secret_id).await.unwrap();
+        let secret = match get_secret_latest_version(db, &secret_id).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(?error, %secret_id, "failed to get secret");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+        };
+
         let secret = match secret {
             Some(value) => value,
             None => return Err(AwsErrorResponse(ResourceNotFoundException).into_response()),

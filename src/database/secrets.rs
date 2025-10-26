@@ -29,6 +29,20 @@ pub struct StoredSecret {
     pub version_tags: Vec<StoredVersionTags>,
 }
 
+#[derive(Clone, FromRow)]
+pub struct SecretVersion {
+    //
+    pub version_id: String,
+    #[sqlx(try_from = "String")]
+    pub version_stage: VersionStage,
+    //
+    pub secret_string: Option<String>,
+    pub secret_binary: Option<String>,
+    //
+    pub created_at: DateTime<Utc>,
+    pub last_accessed_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, Copy, strum::EnumString, strum::Display, Deserialize, Serialize)]
 pub enum VersionStage {
     #[serde(rename = "AWSCURRENT")]
@@ -346,5 +360,22 @@ pub async fn get_secret_by_version_stage_and_id(
     .bind(secret_id)
     .bind(secret_id)
     .fetch_optional(db)
+    .await
+}
+
+/// Get all versions of a secret
+pub async fn get_secret_versions(
+    db: impl DbExecutor<'_>,
+    secret_arn: &str,
+) -> DbResult<Vec<SecretVersion>> {
+    sqlx::query_as(
+        r#"
+        SELECT "secret_version".*
+        FROM ""secrets_versions" "secret_version"
+        WHERE "secret_version"."secret_arn" = "secret"."arn"
+    "#,
+    )
+    .bind(secret_arn)
+    .fetch_all(db)
     .await
 }
