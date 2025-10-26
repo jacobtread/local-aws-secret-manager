@@ -425,8 +425,8 @@ pub async fn get_secret_versions(
     sqlx::query_as(
         r#"
         SELECT "secret_version".*
-        FROM ""secrets_versions" "secret_version"
-        WHERE "secret_version"."secret_arn" = "secret"."arn"
+        FROM "secrets_versions" "secret_version"
+        WHERE "secret_version"."secret_arn" = ?
     "#,
     )
     .bind(secret_arn)
