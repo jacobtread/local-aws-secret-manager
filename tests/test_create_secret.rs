@@ -4,6 +4,7 @@ use aws_sdk_secretsmanager::{
     primitives::Blob,
     types::{Tag, error::ResourceExistsException},
 };
+use uuid::Uuid;
 
 use crate::common::test_server;
 
@@ -148,6 +149,93 @@ async fn test_create_secret_duplicate_error() {
         .create_secret()
         .name("test")
         .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap_err();
+
+    let create_error = match create_error {
+        SdkError::ServiceError(error) => error,
+        error => panic!("expected SdkError::ServiceError got {error:?}"),
+    };
+
+    let _exception: ResourceExistsException = match create_error.into_err() {
+        CreateSecretError::ResourceExistsException(error) => error,
+        error => panic!("expected CreateSecretError::ResourceExistsException got {error:?}"),
+    };
+}
+
+/// Tests that will simulate a client retrying a request.
+///
+/// Uses the same secret and the same ClientRequestToken in order
+/// to simulate a client sending multiple requests after one failed
+///
+/// The server should tolerate this without attempting to create
+/// additional resources
+#[tokio::test]
+async fn test_create_secret_client_retry_safety() {
+    let (client, _server) = test_server().await;
+
+    let client_request_token = Uuid::new_v4().to_string();
+
+    let create_response_1 = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .client_request_token(client_request_token.clone())
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    let create_response_2 = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .client_request_token(client_request_token)
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(create_response_1.arn(), create_response_2.arn());
+    assert_eq!(create_response_1.name(), create_response_2.name());
+    assert_eq!(
+        create_response_1.version_id(),
+        create_response_2.version_id()
+    );
+    assert_eq!(
+        create_response_1.replication_status(),
+        create_response_2.replication_status()
+    );
+}
+
+/// Tests that will simulate trying to create a version that already exists
+///
+/// Uses the same secret and the same ClientRequestToken for a different secret
+///
+/// The server should fail this request
+#[tokio::test]
+async fn test_create_secret_client_duplicate_version_error() {
+    let (client, _server) = test_server().await;
+
+    let client_request_token = Uuid::new_v4().to_string();
+
+    let _create_response = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .client_request_token(client_request_token.clone())
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    let create_error = client
+        .create_secret()
+        .name("test")
+        .secret_string("test-duplicate")
+        .client_request_token(client_request_token)
         .tags(Tag::builder().key("test-tag").value("test-value").build())
         .send()
         .await
