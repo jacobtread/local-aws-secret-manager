@@ -372,6 +372,7 @@ pub async fn get_secret_by_version_stage(
             ON "secret_version"."secret_arn" = "secret"."arn"
             AND "secret_version"."version_stage" = ?
         WHERE "secret"."name" = ? OR "secret"."arn" = ?
+        ORDER BY "secret_version"."created_at" DESC
         LIMIT 1;
     "#,
     )
@@ -437,6 +438,7 @@ pub async fn get_secret_versions(
         SELECT "secret_version".*
         FROM "secrets_versions" "secret_version"
         WHERE "secret_version"."secret_arn" = ?
+        ORDER BY "secret_version"."created_at" DESC
     "#,
     )
     .bind(secret_arn)
