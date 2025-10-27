@@ -25,6 +25,8 @@ pub struct DescribeSecretRequest {
 pub struct DescribeSecretResponse {
     #[serde(rename = "ARN")]
     arn: String,
+    #[serde(rename = "Description")]
+    description: Option<String>,
     #[serde(rename = "CreatedDate")]
     created_date: i64,
     #[serde(rename = "DeletedDate")]
@@ -101,6 +103,7 @@ impl Handler for DescribeSecretHandler {
 
         Ok(DescribeSecretResponse {
             arn: secret.arn,
+            description: secret.description,
             created_date: secret.created_at.timestamp(),
             deleted_date: secret.deleted_at.map(|value| value.timestamp()),
             kms_key_id: None,
