@@ -64,7 +64,7 @@ impl Config {
             Err(_) => false,
         };
 
-        let server_address = std::env::var("SERVER_ADDRESS")
+        let server_address = std::env::var("SM_SERVER_ADDRESS")
             .ok()
             .and_then(|value| value.parse::<SocketAddr>().ok())
             .unwrap_or(if use_https {

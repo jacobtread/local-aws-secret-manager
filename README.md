@@ -37,6 +37,19 @@ Data is stored in an encrypted SQLite database using [SQLCipher](https://github.
 - [ ] [StopReplicationToReplica](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_StopReplicationToReplica.html)
 - [ ] [ValidateResourcePolicy](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_ValidateResourcePolicy.html)
 
+## Environment Variables
+
+| Name                      | Required                                           | Description                                            |
+| ------------------------- | -------------------------------------------------- | ------------------------------------------------------ |
+| SM_ENCRYPTION_KEY         | Yes                                                | Encryption key to encrypt the database with            |
+| SM_DATABASE_PATH          | No (Default: secrets.db)                           | Path to the file where the database should be stored   |
+| SM_ACCESS_KEY_ID          | Yes                                                | Access key ID to use the server for AWS SigV4          |
+| SM_ACCESS_KEY_SECRET      | Yes                                                | Access key secret to use the server for AWS SigV4      |
+| SM_SERVER_ADDRESS         | No (Default: HTTP=0.0.0.0:8080 HTTPS=0.0.0.0:8443) | Socket address to bind the server to                   |
+| SM_USE_HTTPS              | No (Default: false)                                | Whether to use HTTPS instead of HTTP                   |
+| SM_HTTPS_CERTIFICATE_PATH | No (Default: sm.cert.pem)                          | Path to the certificate in PEM format to use for HTTPS |
+| SM_HTTPS_PRIVATE_KEY_PATH | No (Default: sm.key.pem)                           | Path to the private key in PEM format to use for HTTPS |
+
 ## Disclaimer
 
 This project is not affiliated with or endorsed by Amazon AWS.
