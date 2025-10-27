@@ -7,6 +7,7 @@ use crate::{
         Handler,
         error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
     },
+    utils::date::datetime_to_f64,
 };
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
@@ -32,7 +33,7 @@ pub struct DeleteSecretResponse {
     #[serde(rename = "Name")]
     name: String,
     #[serde(rename = "DeletionDate")]
-    deletion_date: i64,
+    deletion_date: f64,
 }
 
 impl Handler for DeleteSecretHandler {
@@ -63,7 +64,7 @@ impl Handler for DeleteSecretHandler {
             return Ok(DeleteSecretResponse {
                 arn: secret.arn,
                 name: secret.name,
-                deletion_date: scheduled_deletion_date.timestamp(),
+                deletion_date: datetime_to_f64(scheduled_deletion_date),
             });
         }
 
@@ -89,7 +90,7 @@ impl Handler for DeleteSecretHandler {
         Ok(DeleteSecretResponse {
             arn: secret.arn,
             name: secret.name,
-            deletion_date: deletion_date.timestamp(),
+            deletion_date: datetime_to_f64(deletion_date),
         })
     }
 }

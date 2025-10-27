@@ -14,6 +14,7 @@ use crate::{
             ResourceNotFoundException,
         },
     },
+    utils::date::datetime_to_f64,
 };
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
@@ -36,7 +37,7 @@ pub struct GetSecretValueResponse {
     #[serde(rename = "ARN")]
     arn: String,
     #[serde(rename = "CreatedDate")]
-    created_date: i64,
+    created_date: f64,
     #[serde(rename = "Name")]
     name: String,
     #[serde(rename = "SecretString")]
@@ -111,7 +112,7 @@ impl Handler for GetSecretValueHandler {
 
         Ok(GetSecretValueResponse {
             arn: secret.arn,
-            created_date: created_at.timestamp(),
+            created_date: datetime_to_f64(created_at),
             name: secret.name,
             secret_string: secret.secret_string,
             secret_binary: secret.secret_binary,

@@ -7,6 +7,7 @@ use crate::{
         Handler, Tag,
         error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
     },
+    utils::date::datetime_to_f64,
 };
 use axum::response::{IntoResponse, Response};
 use indexmap::IndexMap;
@@ -28,21 +29,21 @@ pub struct DescribeSecretResponse {
     #[serde(rename = "Description")]
     description: Option<String>,
     #[serde(rename = "CreatedDate")]
-    created_date: i64,
+    created_date: f64,
     #[serde(rename = "DeletedDate")]
-    deleted_date: Option<i64>,
+    deleted_date: Option<f64>,
     #[serde(rename = "KmsKeyId")]
     kms_key_id: Option<String>,
     #[serde(rename = "LastAccessedDate")]
-    last_accessed_date: Option<i64>,
+    last_accessed_date: Option<f64>,
     #[serde(rename = "LastChangedDate")]
-    last_changed_date: Option<i64>,
+    last_changed_date: Option<f64>,
     #[serde(rename = "LastRotatedDate")]
-    last_rotated_date: Option<i64>,
+    last_rotated_date: Option<f64>,
     #[serde(rename = "Name")]
     name: String,
     #[serde(rename = "NextRotationDate")]
-    next_rotation_date: Option<i64>,
+    next_rotation_date: Option<f64>,
     #[serde(rename = "OwningService")]
     owning_service: Option<String>,
     #[serde(rename = "PrimaryRegion")]
@@ -104,11 +105,11 @@ impl Handler for DescribeSecretHandler {
         Ok(DescribeSecretResponse {
             arn: secret.arn,
             description: secret.description,
-            created_date: secret.created_at.timestamp(),
-            deleted_date: secret.deleted_at.map(|value| value.timestamp()),
+            created_date: datetime_to_f64(secret.created_at),
+            deleted_date: secret.deleted_at.map(datetime_to_f64),
             kms_key_id: None,
-            last_accessed_date: most_recently_used.map(|value| value.timestamp()),
-            last_changed_date: last_changed_date.map(|value| value.timestamp()),
+            last_accessed_date: most_recently_used.map(datetime_to_f64),
+            last_changed_date: last_changed_date.map(datetime_to_f64),
             last_rotated_date: None,
             name: secret.name,
             next_rotation_date: None,
