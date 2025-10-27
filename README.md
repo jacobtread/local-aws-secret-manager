@@ -18,7 +18,7 @@ Data is stored in an encrypted SQLite database using [SQLCipher](https://github.
 - [ ] [ListSecretVersionIds](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_ListSecretVersionIds.html)
 - [x] [PutSecretValue](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_PutSecretValue.htmls)
 - [ ] [RestoreSecret](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_RestoreSecret.html)\*
-- [ ] [TagResource](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_TagResource.html)\*
+- [x] [TagResource](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_TagResource.html)
 - [ ] [UntagResource](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UntagResource.html)\*
 - [ ] [UpdateSecret](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecret.html)\*
 - [ ] [UpdateSecretVersionStage](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecretVersionStage.html)
