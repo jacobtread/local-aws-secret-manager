@@ -104,9 +104,9 @@ pub async fn update_secret_description(
     sqlx::query(
         r#"UPDATE "secrets" SET "description" = ?, "updated_at" = ? WHERE "secrets"."arn" = ?"#,
     )
-    .bind(arn)
     .bind(description)
     .bind(updated_at)
+    .bind(arn)
     .execute(db)
     .await?;
 
