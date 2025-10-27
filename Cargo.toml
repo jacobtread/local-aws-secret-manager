@@ -67,3 +67,8 @@ rand = "=0.9.2"
 [dev-dependencies]
 aws-config = { version = "=1.8.8", features = ["behavior-version-latest"] }
 aws-sdk-secretsmanager = "=1.90.0"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
