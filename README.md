@@ -1,6 +1,6 @@
-# Loker
-
-> WIP
+<h1>
+    <img src="assets/loker.png" height="128px">
+</h1>
 
 **Loker** is a self-hosted AWS secrets manager compatible server. With the main purpose of being used for Integration and End-to-end testing use cases without requiring alternative secret backends.
 
