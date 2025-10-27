@@ -73,6 +73,12 @@ impl Handler for PutSecretValueHandler {
             .copied()
             .unwrap_or(VersionStage::Current);
 
+        // Must only specify one of the two
+        if request.secret_string.is_some() && request.secret_binary.is_some() {
+            return Err(AwsErrorResponse(InvalidRequestException).into_response());
+        }
+
+        // Must specify at least one
         if request.secret_string.is_none() && request.secret_binary.is_none() {
             return Err(AwsErrorResponse(InvalidRequestException).into_response());
         }

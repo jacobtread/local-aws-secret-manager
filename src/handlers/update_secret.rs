@@ -8,7 +8,10 @@ use crate::{
     },
     handlers::{
         Handler,
-        error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
+        error::{
+            AwsErrorResponse, InternalServiceError, InvalidRequestException,
+            ResourceNotFoundException,
+        },
     },
 };
 use axum::response::{IntoResponse, Response};
@@ -49,6 +52,11 @@ impl Handler for UpdateSecretHandler {
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let secret_id = request.secret_id;
+
+        // Must only specify one of the two
+        if request.secret_string.is_some() && request.secret_binary.is_some() {
+            return Err(AwsErrorResponse(InvalidRequestException).into_response());
+        }
 
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,
