@@ -1,17 +1,21 @@
 use crate::{
     database::DbPool,
     handlers::{
+        batch_get_secret_value::BatchGetSecretValueHandler,
         create_secret::CreateSecretHandler,
         delete_secret::DeleteSecretHandler,
         describe_secret::DescribeSecretHandler,
         error::{AwsErrorResponse, InternalServiceError, InvalidRequestException, NotImplemented},
+        get_random_password::GetRandomPasswordHandler,
         get_secret_value::GetSecretValueHandler,
+        list_secret_version_ids::ListSecretVersionIdsHandler,
         list_secrets::ListSecretsHandler,
         put_secret_value::PutSecretValueHandler,
         restore_secret::RestoreSecretHandler,
         tag_resource::TagResourceHandler,
         untag_resource::UntagResourceHandler,
         update_secret::UpdateSecretHandler,
+        update_secret_version_stage::UpdateSecretVersionStageHandler,
     },
 };
 use axum::{
@@ -25,17 +29,21 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::HashMap, convert::Infallible, pin::Pin, sync::Arc, task::Poll};
 use tower::Service;
 
+pub mod batch_get_secret_value;
 pub mod create_secret;
 pub mod delete_secret;
 pub mod describe_secret;
 pub mod error;
+pub mod get_random_password;
 pub mod get_secret_value;
+pub mod list_secret_version_ids;
 pub mod list_secrets;
 pub mod put_secret_value;
 pub mod restore_secret;
 pub mod tag_resource;
 pub mod untag_resource;
 pub mod update_secret;
+pub mod update_secret_version_stage;
 
 pub fn create_handlers() -> HandlerRouter {
     HandlerRouter::default()
@@ -49,6 +57,19 @@ pub fn create_handlers() -> HandlerRouter {
         .add_handler("secretsmanager.RestoreSecret", RestoreSecretHandler)
         .add_handler("secretsmanager.TagResource", TagResourceHandler)
         .add_handler("secretsmanager.UntagResource", UntagResourceHandler)
+        .add_handler("secretsmanager.GetRandomPassword", GetRandomPasswordHandler)
+        .add_handler(
+            "secretsmanager.ListSecretVersionIds",
+            ListSecretVersionIdsHandler,
+        )
+        .add_handler(
+            "secretsmanager.UpdateSecretVersionStage",
+            UpdateSecretVersionStageHandler,
+        )
+        .add_handler(
+            "secretsmanager.BatchGetSecretValue",
+            BatchGetSecretValueHandler,
+        )
 }
 
 #[derive(Deserialize, Serialize)]
