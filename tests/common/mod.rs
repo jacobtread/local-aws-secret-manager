@@ -35,6 +35,7 @@ pub fn test_sdk_config(endpoint_url: &str) -> SdkConfig {
 #[allow(dead_code)]
 pub struct TestServer {
     sdk_config: SdkConfig,
+    pub db: DbPool,
     handle: AbortHandle,
 }
 
@@ -59,6 +60,7 @@ pub async fn test_server() -> (aws_sdk_secretsmanager::Client, TestServer) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let db = memory_database().await;
     let server_address = listener.local_addr().unwrap();
+    let harness_db = db.clone();
 
     let abort_handle = tokio::spawn(async move {
         let handlers = handlers::create_handlers();
@@ -83,6 +85,7 @@ pub async fn test_server() -> (aws_sdk_secretsmanager::Client, TestServer) {
         TestServer {
             sdk_config,
             handle: abort_handle,
+            db: harness_db,
         },
     )
 }
