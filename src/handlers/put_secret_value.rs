@@ -147,7 +147,7 @@ impl Handler for PutSecretValueHandler {
 
                 // If the stored version data doesn't match this is an error that
                 // the resource already exists
-                if request.secret_string.ne(&request.secret_string)
+                if secret.secret_string.ne(&request.secret_string)
                     || secret.secret_binary.ne(&request.secret_binary)
                 {
                     return Err(AwsErrorResponse(ResourceExistsException).into_response());

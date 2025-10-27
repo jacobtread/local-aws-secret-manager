@@ -103,17 +103,27 @@ impl Handler for CreateSecretHandler {
                     }
                 };
 
-                // Another request already created this version
-                if secret.is_some() {
-                    return Ok(CreateSecretResponse {
-                        arn,
-                        name,
-                        version_id,
-                    });
+                let secret = match secret {
+                    Some(value) => value,
+                    None => {
+                        // Shouldn't be possible if we hit the unique violation
+                        return Err(AwsErrorResponse(InternalServiceError).into_response());
+                    }
+                };
+
+                // If the stored version data doesn't match this is an error that
+                // the resource already exists
+                if secret.secret_string.ne(&request.secret_string)
+                    || secret.secret_binary.ne(&request.secret_binary)
+                {
+                    return Err(AwsErrorResponse(ResourceExistsException).into_response());
                 }
 
-                // Tried to create a secret that already exists (And wasn't a matching version on the existing one)
-                return Err(AwsErrorResponse(ResourceExistsException).into_response());
+                return Ok(CreateSecretResponse {
+                    arn,
+                    name,
+                    version_id,
+                });
             }
 
             tracing::error!(?error, %name, "failed to create secret");
@@ -127,8 +137,8 @@ impl Handler for CreateSecretHandler {
                 secret_arn: arn.clone(),
                 version_id: version_id.clone(),
                 version_stage: VersionStage::Current,
-                secret_string: request.secret_string,
-                secret_binary: request.secret_binary,
+                secret_string: request.secret_string.clone(),
+                secret_binary: request.secret_binary.clone(),
             },
         )
         .await
@@ -136,6 +146,36 @@ impl Handler for CreateSecretHandler {
             if let Some(error) = error.as_database_error()
                 && error.is_unique_violation()
             {
+                // Must rollback the transaction before attempting to use the connection
+                if let Err(error) = t.rollback().await {
+                    tracing::error!(?error, "failed to rollback transaction");
+                }
+
+                // Check if the secret has been created
+                let secret = match get_secret_by_version_id(db, &arn, &version_id).await {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::error!(?error, name = %name,"failed to determine existing version");
+                        return Err(AwsErrorResponse(InternalServiceError).into_response());
+                    }
+                };
+
+                let secret = match secret {
+                    Some(value) => value,
+                    None => {
+                        // Shouldn't be possible if we hit the unique violation
+                        return Err(AwsErrorResponse(InternalServiceError).into_response());
+                    }
+                };
+
+                // If the stored version data doesn't match this is an error that
+                // the resource already exists
+                if secret.secret_string.ne(&request.secret_string)
+                    || secret.secret_binary.ne(&request.secret_binary)
+                {
+                    return Err(AwsErrorResponse(ResourceExistsException).into_response());
+                }
+
                 // Another request already created this version
                 return Ok(CreateSecretResponse {
                     arn,
