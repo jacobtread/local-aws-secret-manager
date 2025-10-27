@@ -58,12 +58,22 @@ impl Handler for DeleteSecretHandler {
             None => return Err(AwsErrorResponse(ResourceNotFoundException).into_response()),
         };
 
+        // Secret is already scheduled for deletion
+        if let Some(scheduled_deletion_date) = secret.scheduled_delete_at {
+            return Ok(DeleteSecretResponse {
+                arn: secret.arn,
+                name: secret.name,
+                deletion_date: scheduled_deletion_date.timestamp(),
+            });
+        }
+
         let deletion_date = if force_delete_without_recovery {
             if let Err(error) = delete_secret(db, &secret.arn).await {
                 tracing::error!(?error, %secret_id, "failed to delete secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
 
+            // Secret has been deleted
             Utc::now()
         } else {
             match schedule_delete_secret(db, &secret.arn, recovery_window_in_days).await {
