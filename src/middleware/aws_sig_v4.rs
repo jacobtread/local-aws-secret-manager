@@ -10,8 +10,9 @@ use axum::{
     http::{Request, header::AUTHORIZATION},
     response::{IntoResponse, Response},
 };
+use futures::future::BoxFuture;
 use http_body_util::BodyExt;
-use std::{mem::swap, pin::Pin, sync::Arc};
+use std::{mem::swap, sync::Arc};
 use thiserror::Error;
 use tower::{Layer, Service};
 
@@ -59,8 +60,7 @@ where
 {
     type Response = Response;
     type Error = S::Error;
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
         &mut self,

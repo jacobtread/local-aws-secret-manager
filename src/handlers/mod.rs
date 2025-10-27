@@ -24,9 +24,10 @@ use axum::{
     http::Request,
     response::{IntoResponse, Response},
 };
+use futures::future::BoxFuture;
 use http_body_util::BodyExt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{collections::HashMap, convert::Infallible, pin::Pin, sync::Arc, task::Poll};
+use std::{collections::HashMap, convert::Infallible, sync::Arc, task::Poll};
 use tower::Service;
 
 pub mod batch_get_secret_value;
@@ -114,8 +115,7 @@ pub struct HandlerRouterService {
 impl Service<Request<Body>> for HandlerRouterService {
     type Response = Response;
     type Error = Infallible;
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
         &mut self,
@@ -175,11 +175,7 @@ pub trait Handler: Send + Sync + 'static {
 /// Associated type erased [Handler] that takes a generic request and provides
 /// a generic response
 pub trait ErasedHandler: Send + Sync + 'static {
-    fn handle<'r>(
-        &self,
-        db: &'r DbPool,
-        request: &'r [u8],
-    ) -> Pin<Box<dyn Future<Output = Response> + Send + 'r>>;
+    fn handle<'r>(&self, db: &'r DbPool, request: &'r [u8]) -> BoxFuture<'r, Response>;
 }
 
 /// Handler that takes care of the process of deserializing the request
@@ -189,11 +185,7 @@ pub struct HandlerBase<H: Handler> {
 }
 
 impl<H: Handler> ErasedHandler for HandlerBase<H> {
-    fn handle<'r>(
-        &self,
-        db: &'r DbPool,
-        request: &'r [u8],
-    ) -> Pin<Box<dyn Future<Output = Response> + Send + 'r>> {
+    fn handle<'r>(&self, db: &'r DbPool, request: &'r [u8]) -> BoxFuture<'r, Response> {
         Box::pin(async move {
             let request: H::Request = match serde_json::from_slice(request) {
                 Ok(value) => value,
