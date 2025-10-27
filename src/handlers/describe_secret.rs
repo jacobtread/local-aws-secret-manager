@@ -10,8 +10,8 @@ use crate::{
     utils::date::datetime_to_f64,
 };
 use axum::response::{IntoResponse, Response};
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_DescribeSecret.html
 pub struct DescribeSecretHandler;
@@ -59,7 +59,7 @@ pub struct DescribeSecretResponse {
     #[serde(rename = "Tags")]
     tags: Vec<Tag>,
     #[serde(rename = "VersionIdsToStages")]
-    version_ids_to_stages: IndexMap<String, Vec<VersionStage>>,
+    version_ids_to_stages: HashMap<String, Vec<VersionStage>>,
 }
 
 impl Handler for DescribeSecretHandler {
