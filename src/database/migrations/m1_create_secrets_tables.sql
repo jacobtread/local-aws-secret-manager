@@ -7,12 +7,12 @@ CREATE TABLE IF NOT EXISTS "secrets" (
     "description" TEXT NULL,
 
     -- Timestamps
-    "created_at" DATETIME NOT NULL,
-    "updated_at" DATETIME NULL,
+    "created_at" TEXT NOT NULL,
+    "updated_at" TEXT NULL,
 
     -- Datetime the resource was marked for deletion and the datetime its scheduled to be deleted by
-    "deleted_at" DATETIME NULL,
-    "scheduled_delete_at" DATETIME NULL,
+    "deleted_at" TEXT NULL,
+    "scheduled_delete_at" TEXT NULL,
 
     -- Name must be unique
     UNIQUE ("name")
@@ -36,8 +36,8 @@ CREATE TABLE IF NOT EXISTS "secrets_versions" (
     "secret_binary" TEXT NULL,
 
     -- Timestamps
-    "created_at" DATETIME NOT NULL,
-    "last_accessed_at" DATETIME NULL,
+    "created_at" TEXT NOT NULL,
+    "last_accessed_at" TEXT NULL,
 
     -- Composite primary key
     PRIMARY KEY ("secret_arn", "version_id"),
@@ -60,8 +60,8 @@ CREATE TABLE IF NOT EXISTS "secrets_tags" (
     "value" TEXT NOT NULL,
 
     -- Timestamps
-    "created_at" DATETIME NOT NULL,
-    "updated_at" DATETIME NULL,
+    "created_at" TEXT NOT NULL,
+    "updated_at" TEXT NULL,
 
     -- Composite primary key
     PRIMARY KEY ("secret_arn", "key"),

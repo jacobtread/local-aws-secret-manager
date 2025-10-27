@@ -348,8 +348,6 @@ async fn test_get_secret_value_by_arn_with_previous_stage_when_multiple_string_s
     // Name should match
     assert_eq!(create_response.name(), Some("test"));
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
     let previous_response = client
         .put_secret_value()
         .secret_id("test")
@@ -357,8 +355,6 @@ async fn test_get_secret_value_by_arn_with_previous_stage_when_multiple_string_s
         .send()
         .await
         .unwrap();
-
-    tokio::time::sleep(Duration::from_secs(1)).await;
 
     let _last_response = client
         .put_secret_value()

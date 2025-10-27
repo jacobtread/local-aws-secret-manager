@@ -1,10 +1,10 @@
 use std::str::FromStr;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Days, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
 
-use crate::database::{DbExecutor, DbResult};
+use crate::database::{DbErr, DbExecutor, DbResult};
 
 #[derive(Clone, FromRow)]
 pub struct StoredSecret {
@@ -76,14 +76,17 @@ pub struct CreateSecret {
 
 /// Create a new "secret" with no versions
 pub async fn create_secret(db: impl DbExecutor<'_>, create: CreateSecret) -> DbResult<()> {
+    let created_at = Utc::now();
+
     sqlx::query(
         r#"
-        INSERT INTO "secrets" ("arn", "name", "description", "created_at") VALUES (?, ?, ?, datetime('now'))
+        INSERT INTO "secrets" ("arn", "name", "description", "created_at") VALUES (?, ?, ?, ?)
     "#,
     )
     .bind(create.arn)
     .bind(create.name)
     .bind(create.description)
+    .bind(created_at)
     .execute(db)
     .await?;
 
@@ -96,9 +99,12 @@ pub async fn update_secret_description(
     arn: &str,
     description: &str,
 ) -> DbResult<()> {
-    sqlx::query(r#"UPDATE "secrets" SET "description" = ?, "updated_at" = datetime('now') WHERE "secrets"."secret_arn" = ?"#)
+    let updated_at = Utc::now();
+
+    sqlx::query(r#"UPDATE "secrets" SET "description" = ?, "updated_at" = ? WHERE "secrets"."secret_arn" = ?"#)
         .bind(arn)
         .bind(description)
+        .bind(updated_at)
         .execute(db)
         .await?;
 
@@ -127,7 +133,10 @@ pub async fn get_scheduled_secret_deletions(db: impl DbExecutor<'_>) -> DbResult
 
 /// Delete all secrets that have past their "scheduled_delete_at" date
 pub async fn delete_scheduled_secrets(db: impl DbExecutor<'_>) -> DbResult<()> {
-    sqlx::query(r#"DELETE FROM "secrets" WHERE "scheduled_delete_at" < datetime('now')"#)
+    let now = Utc::now();
+
+    sqlx::query(r#"DELETE FROM "secrets" WHERE "scheduled_delete_at" < ?"#)
+        .bind(now)
         .execute(db)
         .await?;
 
@@ -141,17 +150,27 @@ pub async fn schedule_delete_secret(
     secret_arn: &str,
     days: i32,
 ) -> DbResult<DateTime<Utc>> {
+    let deleted_at = Utc::now();
+    let scheduled_deleted_at = deleted_at
+        .checked_add_days(Days::new(days as u64))
+        .ok_or_else(|| {
+            DbErr::Encode(Box::new(std::io::Error::other(
+                "failed to create a future timestamp",
+            )))
+        })?;
+
     let (date,): (DateTime<Utc>,) = sqlx::query_as(
         r#"
         UPDATE "secrets"
         SET
-            "deleted_at" = datetime('now'),
-            "scheduled_delete_at" = datetime('now', '+' || ? || ' days')
+            "deleted_at" = ?,
+            "scheduled_delete_at" = ?
         WHERE "arn" = ?
         RETURNING "scheduled_delete_at"
         "#,
     )
-    .bind(days)
+    .bind(deleted_at)
+    .bind(scheduled_deleted_at)
     .bind(secret_arn)
     .fetch_one(db)
     .await?;
@@ -185,19 +204,22 @@ pub async fn put_secret_tag(
     key: &str,
     value: &str,
 ) -> DbResult<()> {
+    let now = Utc::now();
+
     sqlx::query(
         r#"
         INSERT INTO "secrets_tags" ("secret_arn", "key", "value", "created_at")
-        VALUES (?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?)
         ON CONFLICT("secret_arn", key)
         DO UPDATE SET
             "value" = "excluded"."value",
-            "updated_at" = datetime('now')
+            "updated_at" = "excluded"."created_at"
         "#,
     )
     .bind(secret_arn)
     .bind(key)
     .bind(value)
+    .bind(now)
     .execute(db)
     .await?;
 
@@ -251,10 +273,12 @@ pub async fn create_secret_version(
     db: impl DbExecutor<'_>,
     create: CreateSecretVersion,
 ) -> DbResult<()> {
+    let now = Utc::now();
+
     sqlx::query(
         r#"
         INSERT INTO "secrets_versions" ("secret_arn", "version_id", "version_stage", "secret_string", "secret_binary", "created_at")
-        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(create.secret_arn)
@@ -262,6 +286,7 @@ pub async fn create_secret_version(
     .bind(create.version_stage.to_string())
     .bind(create.secret_string)
     .bind(create.secret_binary)
+    .bind(now)
     .execute(db)
     .await?;
 
@@ -274,12 +299,15 @@ pub async fn update_secret_version_last_accessed(
     secret_arn: &str,
     version_id: &str,
 ) -> DbResult<()> {
+    let now = Utc::now();
+
     sqlx::query(
         r#"
         UPDATE "secrets_versions"
-        SET "last_accessed_at" = datetime('now')
+        SET "last_accessed_at" = ?
         WHERE "secret_arn" = ? AND "version_id" = ?"#,
     )
+    .bind(now)
     .bind(secret_arn)
     .bind(version_id)
     .execute(db)
@@ -449,6 +477,13 @@ pub async fn get_secret_versions(
 /// Takes any secrets with over 100 versions and deletes any secrets that
 /// are over 24h old until there is only 100 versions for each secret
 pub async fn delete_excess_secret_versions(db: impl DbExecutor<'_>) -> DbResult<()> {
+    let now = Utc::now();
+    let cutoff = now.checked_sub_days(Days::new(1)).ok_or_else(|| {
+        DbErr::Encode(Box::new(std::io::Error::other(
+            "failed to create a future timestamp",
+        )))
+    })?;
+
     sqlx::query(
         r#"
         WITH "ranked_versions" AS (
@@ -465,10 +500,11 @@ pub async fn delete_excess_secret_versions(db: impl DbExecutor<'_>) -> DbResult<
             SELECT "secret_arn", "version_id"
             FROM "ranked_versions"
             WHERE "row_number" > 100
-              AND datetime("created_at", '+1 day') < datetime('now')
+              AND "created_at" < ?
         );
         "#,
     )
+    .bind(cutoff)
     .execute(db)
     .await?;
 
