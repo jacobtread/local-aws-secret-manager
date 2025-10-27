@@ -35,7 +35,7 @@ pub struct PutSecretValueRequest {
     #[serde(rename = "SecretBinary")]
     secret_binary: Option<String>,
     #[serde(rename = "VersionStages")]
-    version_stages: Vec<String>,
+    version_stages: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -62,6 +62,7 @@ impl Handler for PutSecretValueHandler {
 
         let version_stages: Vec<VersionStage> = request
             .version_stages
+            .unwrap_or_default()
             .into_iter()
             // TODO: Handle unsupported?
             .filter_map(|version| VersionStage::try_from(version).ok())
