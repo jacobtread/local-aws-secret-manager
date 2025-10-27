@@ -117,7 +117,7 @@ impl Handler for CreateSecretHandler {
                 }
 
                 // Check if the secret has been created
-                let secret = match get_secret_by_version_id(db, &arn, &version_id).await {
+                let secret = match get_secret_by_version_id(db, &name, &version_id).await {
                     Ok(value) => value,
                     Err(error) => {
                         tracing::error!(?error, %name, "failed to determine existing version");
@@ -141,8 +141,9 @@ impl Handler for CreateSecretHandler {
                     return Err(AwsErrorResponse(ResourceExistsException).into_response());
                 }
 
+                // Request has already been fulfilled
                 return Ok(CreateSecretResponse {
-                    arn,
+                    arn: secret.arn,
                     name,
                     version_id,
                 });
@@ -198,7 +199,7 @@ impl Handler for CreateSecretHandler {
                     return Err(AwsErrorResponse(ResourceExistsException).into_response());
                 }
 
-                // Another request already created this version
+                // Request has already been fulfilled
                 return Ok(CreateSecretResponse {
                     arn,
                     name,
