@@ -175,8 +175,8 @@ impl Handler for PutSecretValueHandler {
         Ok(PutSecretValueResponse {
             arn: secret.arn,
             name: secret.name,
-            version_id: secret.version_id,
-            version_stages: vec![secret.version_stage],
+            version_id,
+            version_stages: vec![version_stage],
         })
     }
 }
