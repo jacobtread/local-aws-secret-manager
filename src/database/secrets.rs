@@ -101,12 +101,14 @@ pub async fn update_secret_description(
 ) -> DbResult<()> {
     let updated_at = Utc::now();
 
-    sqlx::query(r#"UPDATE "secrets" SET "description" = ?, "updated_at" = ? WHERE "secrets"."secret_arn" = ?"#)
-        .bind(arn)
-        .bind(description)
-        .bind(updated_at)
-        .execute(db)
-        .await?;
+    sqlx::query(
+        r#"UPDATE "secrets" SET "description" = ?, "updated_at" = ? WHERE "secrets"."arn" = ?"#,
+    )
+    .bind(arn)
+    .bind(description)
+    .bind(updated_at)
+    .execute(db)
+    .await?;
 
     Ok(())
 }
@@ -186,7 +188,7 @@ pub async fn cancel_delete_secret(db: impl DbExecutor<'_>, secret_arn: &str) -> 
         SET
             "deleted_at" = NULL,
             "scheduled_delete_at" = NULL
-        WHERE "secret_arn" = ?
+        WHERE "arn" = ?
         RETURNING "scheduled_delete_at"
         "#,
     )
