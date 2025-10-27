@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use aws_sdk_secretsmanager::{
     error::SdkError,
     operation::get_secret_value::GetSecretValueError,
