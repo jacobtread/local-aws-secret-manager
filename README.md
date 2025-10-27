@@ -50,6 +50,11 @@ Data is stored in an encrypted SQLite database using [SQLCipher](https://github.
 | SM_HTTPS_CERTIFICATE_PATH | No (Default: sm.cert.pem)                          | Path to the certificate in PEM format to use for HTTPS |
 | SM_HTTPS_PRIVATE_KEY_PATH | No (Default: sm.key.pem)                           | Path to the private key in PEM format to use for HTTPS |
 
+## Windows Build Notes
+
+If you are building on Windows ensure you download the required prerequisites from https://wiki.openssl.org/index.php/Compilation_and_Installation#Windows
+**Loker** depends on OpenSSL for the vendored SQLCipher dependency
+
 ## Disclaimer
 
 This project is not affiliated with or endorsed by Amazon AWS.
