@@ -56,7 +56,7 @@ async fn memory_database() -> DbPool {
 
 #[allow(dead_code)]
 pub async fn test_server() -> (aws_sdk_secretsmanager::Client, TestServer) {
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let db = memory_database().await;
     let server_address = listener.local_addr().unwrap();
 
