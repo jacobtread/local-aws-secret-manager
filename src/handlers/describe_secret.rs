@@ -95,7 +95,14 @@ impl Handler for DescribeSecretHandler {
             .filter_map(|version| version.last_accessed_at)
             .max();
 
-        let last_changed_date = versions.iter().map(|version| version.created_at).max();
+        let tags_updated_at = secret.version_tags.iter().filter_map(|tag| tag.updated_at);
+
+        let last_changed_date = versions
+            .iter()
+            .map(|version| version.created_at)
+            .chain(secret.updated_at)
+            .chain(tags_updated_at)
+            .max();
 
         let version_ids_to_stages = versions
             .iter()
