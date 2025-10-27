@@ -10,7 +10,9 @@ use crate::database::{DbErr, DbExecutor, DbResult};
 pub struct StoredSecret {
     pub arn: String,
     pub name: String,
+    //
     pub created_at: DateTime<Utc>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub scheduled_delete_at: Option<DateTime<Utc>>,
     //
@@ -66,6 +68,7 @@ pub struct StoredVersionTags {
     pub key: String,
     pub value: String,
     pub created_at: DateTime<Utc>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 pub struct CreateSecret {
@@ -348,7 +351,8 @@ pub async fn get_secret_by_version_id(
                     json_object(
                         'key', "secret_tag"."key",
                         'value', "secret_tag"."value",
-                        'created_at', strftime('%Y-%m-%dT%H:%M:%SZ', "secret_tag"."created_at")
+                        'created_at', "secret_tag"."created_at",
+                        'updated_at', "secret_tag"."updated_at"
                     )
                 )
                 FROM "secrets_tags" "secret_tag"
@@ -391,7 +395,8 @@ pub async fn get_secret_by_version_stage(
                     json_object(
                         'key', "secret_tag"."key",
                         'value', "secret_tag"."value",
-                        'created_at', strftime('%Y-%m-%dT%H:%M:%SZ', "secret_tag"."created_at")
+                        'created_at', "secret_tag"."created_at",
+                        'updated_at', "secret_tag"."updated_at"
                     )
                 )
                 FROM "secrets_tags" "secret_tag"
@@ -436,7 +441,8 @@ pub async fn get_secret_by_version_stage_and_id(
                     json_object(
                         'key', "secret_tag"."key",
                         'value', "secret_tag"."value",
-                        'created_at', strftime('%Y-%m-%dT%H:%M:%SZ', "secret_tag"."created_at")
+                        'created_at', "secret_tag"."created_at",
+                        'updated_at', "secret_tag"."updated_at"
                     )
                 )
                 FROM "secrets_tags" "secret_tag"
