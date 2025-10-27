@@ -13,6 +13,12 @@
     "thiserror",
     "indexmap",
     "strftime",
-    "chrono"
+    "chrono",
+    "serde",
+    "libsqlite",
+    "sqlcipher",
+    "loker",
+    "Jacobtread",
+    "subsec"
   ]
 }
