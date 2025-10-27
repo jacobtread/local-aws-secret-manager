@@ -128,8 +128,8 @@ impl Handler for CreateSecretHandler {
                 let secret = match secret {
                     Some(value) => value,
                     None => {
-                        // Shouldn't be possible if we hit the unique violation
-                        return Err(AwsErrorResponse(InternalServiceError).into_response());
+                        // This version we tried to store was not created so this is an already exists error
+                        return Err(AwsErrorResponse(ResourceExistsException).into_response());
                     }
                 };
 
