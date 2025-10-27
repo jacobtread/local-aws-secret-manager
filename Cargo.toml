@@ -1,7 +1,12 @@
 [package]
 name = "loker"
+description = "Self-hosted AWS secrets manager compatible server"
 version = "0.1.0"
 edition = "2024"
+readme = "README.md"
+license = "MIT"
+authors = ["Jacobtread <jacobtread@gmail.com>"]
+repository = "https://github.com/jacobtread/loker"
 
 [dependencies]
 # Environment variables
