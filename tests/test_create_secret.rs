@@ -2,7 +2,10 @@ use aws_sdk_secretsmanager::{
     error::SdkError,
     operation::create_secret::CreateSecretError,
     primitives::Blob,
-    types::{Tag, error::ResourceExistsException},
+    types::{
+        Tag,
+        error::{InvalidRequestException, ResourceExistsException},
+    },
 };
 use uuid::Uuid;
 
@@ -281,4 +284,57 @@ async fn test_create_secret_arn_unique() {
         .unwrap();
 
     assert_ne!(create_response_1.arn(), create_response_2.arn());
+}
+
+/// Tests that not specifying a secret value will error
+#[tokio::test]
+async fn test_create_secret_value_missing_value_error() {
+    let (client, _server) = test_server().await;
+
+    let create_error = client
+        .create_secret()
+        .name("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap_err();
+
+    let create_error = match create_error {
+        SdkError::ServiceError(error) => error,
+        error => panic!("expected SdkError::ServiceError got {error:?}"),
+    };
+
+    let _exception: InvalidRequestException = match create_error.into_err() {
+        CreateSecretError::InvalidRequestException(error) => error,
+        error => panic!("expected CreateSecretError::InvalidRequestException got {error:?}"),
+    };
+}
+
+/// Tests that specifying both a string and binary secret value should
+/// error, only one of the two should be able to be provided
+#[tokio::test]
+async fn test_create_secret_value_both_secret_type_error() {
+    let (client, _server) = test_server().await;
+
+    let binary_secret = Blob::new(b"TEST");
+
+    let create_error = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .secret_binary(binary_secret)
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap_err();
+
+    let create_error = match create_error {
+        SdkError::ServiceError(error) => error,
+        error => panic!("expected SdkError::ServiceError got {error:?}"),
+    };
+
+    let _exception: InvalidRequestException = match create_error.into_err() {
+        CreateSecretError::InvalidRequestException(error) => error,
+        error => panic!("expected CreateSecretError::InvalidRequestException got {error:?}"),
+    };
 }

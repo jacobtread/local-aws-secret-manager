@@ -1,4 +1,9 @@
-use aws_sdk_secretsmanager::{primitives::Blob, types::Tag};
+use aws_sdk_secretsmanager::{
+    error::SdkError,
+    operation::put_secret_value::PutSecretValueError,
+    primitives::Blob,
+    types::{Tag, error::InvalidRequestException},
+};
 use loker::database::secrets::VersionStage;
 
 use crate::common::test_server;
@@ -153,4 +158,73 @@ async fn test_put_secret_value_binary_secret_success() {
         get_response.version_stages(),
         &[VersionStage::Current.to_string()]
     );
+}
+
+/// Tests that not specifying a secret value will error
+#[tokio::test]
+async fn test_put_secret_value_missing_value_error() {
+    let (client, _server) = test_server().await;
+
+    let _create_response = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    let put_error = client
+        .put_secret_value()
+        .secret_id("test")
+        .send()
+        .await
+        .unwrap_err();
+
+    let put_error = match put_error {
+        SdkError::ServiceError(error) => error,
+        error => panic!("expected SdkError::ServiceError got {error:?}"),
+    };
+
+    let _exception: InvalidRequestException = match put_error.into_err() {
+        PutSecretValueError::InvalidRequestException(error) => error,
+        error => panic!("expected PutSecretValueError::InvalidRequestException got {error:?}"),
+    };
+}
+
+/// Tests that specifying both a string and binary secret value should
+/// error, only one of the two should be able to be provided
+#[tokio::test]
+async fn test_put_secret_value_both_secret_type_error() {
+    let (client, _server) = test_server().await;
+
+    let _create_response = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    let binary_secret = Blob::new(b"TEST");
+
+    let put_error = client
+        .put_secret_value()
+        .secret_id("test")
+        .secret_string("test-updated")
+        .secret_binary(binary_secret)
+        .send()
+        .await
+        .unwrap_err();
+
+    let put_error = match put_error {
+        SdkError::ServiceError(error) => error,
+        error => panic!("expected SdkError::ServiceError got {error:?}"),
+    };
+
+    let _exception: InvalidRequestException = match put_error.into_err() {
+        PutSecretValueError::InvalidRequestException(error) => error,
+        error => panic!("expected PutSecretValueError::InvalidRequestException got {error:?}"),
+    };
 }
