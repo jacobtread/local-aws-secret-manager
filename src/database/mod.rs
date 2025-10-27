@@ -25,6 +25,9 @@ pub type DbTransaction<'c> = Transaction<'c, Sqlite>;
 
 #[derive(Debug, Error)]
 pub enum CreateDatabaseError {
+    #[error("failed to create database file parent folders")]
+    CreateParentFolders(std::io::Error),
+
     #[error("failed to create database file")]
     CreateFile(std::io::Error),
 
@@ -35,6 +38,13 @@ pub enum CreateDatabaseError {
 pub async fn create_database(key: String, raw_path: String) -> Result<DbPool, CreateDatabaseError> {
     let path = Path::new(&raw_path);
     if !path.exists() {
+        // Ensure the path to the database exists
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(CreateDatabaseError::CreateParentFolders)?;
+        }
+
         let _file = File::create(&path)
             .await
             .map_err(CreateDatabaseError::CreateFile)?;
