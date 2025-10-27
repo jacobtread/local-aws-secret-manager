@@ -251,3 +251,34 @@ async fn test_create_secret_client_duplicate_version_error() {
         error => panic!("expected CreateSecretError::ResourceExistsException got {error:?}"),
     };
 }
+
+/// The CreateSecret documentation specifies that secrets created with the same
+/// name should still have a different ARN due to the randomly appended suffix
+/// to ensure IAM policies that only targeted the previous version ARN don't apply
+/// to the new one unless explicitly decided
+#[tokio::test]
+async fn test_create_secret_arn_unique() {
+    let (client, _server) = test_server().await;
+
+    let create_response_1 = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    let (client, _server) = test_server().await;
+
+    let create_response_2 = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    assert_ne!(create_response_1.arn(), create_response_2.arn());
+}

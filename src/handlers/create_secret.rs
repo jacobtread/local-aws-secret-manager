@@ -15,6 +15,7 @@ use crate::{
     },
 };
 use axum::response::{IntoResponse, Response};
+use rand::{Rng, distr::Alphanumeric};
 use serde::{Deserialize, Serialize};
 use std::ops::DerefMut;
 use uuid::Uuid;
@@ -48,13 +49,28 @@ pub struct CreateSecretResponse {
     version_id: String,
 }
 
+/// Generate a new secret ARN
+///
+/// Uses the mock prefix arn:aws:secretsmanager:us-east-1:1:secret:
+/// and provides a randomly generated suffix as is done by the
+/// official implementation
+fn create_secret_arn(name: &str) -> String {
+    let random_suffix: String = rand::rng()
+        .sample_iter(&Alphanumeric)
+        .take(6)
+        .map(char::from)
+        .collect();
+
+    format!("arn:aws:secretsmanager:us-east-1:1:secret:{name}-{random_suffix}")
+}
+
 impl Handler for CreateSecretHandler {
     type Request = CreateSecretRequest;
     type Response = CreateSecretResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let name = request.name;
-        let arn = format!("arn:aws:secretsmanager:us-east-1:1:secret:{name}");
+        let arn = create_secret_arn(&name);
 
         let version_id = request
             .client_request_token
