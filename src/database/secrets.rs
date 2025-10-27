@@ -11,7 +11,7 @@ pub struct StoredSecret {
     pub arn: String,
     pub name: String,
     pub created_at: DateTime<Utc>,
-    pub delete_at: Option<DateTime<Utc>>,
+    pub deleted_at: Option<DateTime<Utc>>,
     pub scheduled_delete_at: Option<DateTime<Utc>>,
     //
     pub version_id: String,
@@ -107,12 +107,22 @@ pub async fn update_secret_description(
 
 /// Remove a secret
 pub async fn delete_secret(db: impl DbExecutor<'_>, secret_arn: &str) -> DbResult<()> {
-    sqlx::query(r#"DELETE FROM "secrets" WHERE "secret_arn" = ?"#)
+    sqlx::query(r#"DELETE FROM "secrets" WHERE "arn" = ?"#)
         .bind(secret_arn)
         .execute(db)
         .await?;
 
     Ok(())
+}
+
+/// Get the ARN's of all the secrets that are scheduled for deletion
+///
+/// Not used by the actual application, only used within tests to ensure
+/// a deletion was properly scheduled
+pub async fn get_scheduled_secret_deletions(db: impl DbExecutor<'_>) -> DbResult<Vec<(String,)>> {
+    sqlx::query_as(r#"SELECT "arn" FROM "secrets" WHERE "scheduled_delete_at" IS NOT NULL"#)
+        .fetch_all(db)
+        .await
 }
 
 /// Delete all secrets that have past their "scheduled_delete_at" date
@@ -137,7 +147,7 @@ pub async fn schedule_delete_secret(
         SET
             "deleted_at" = datetime('now'),
             "scheduled_delete_at" = datetime('now', '+' || ? || ' days')
-        WHERE "secret_arn" = ?
+        WHERE "arn" = ?
         RETURNING "scheduled_delete_at"
         "#,
     )

@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS "secrets" (
     "updated_at" DATETIME NULL,
 
     -- Datetime the resource was marked for deletion and the datetime its scheduled to be deleted by
-    "delete_at" DATETIME NULL,
+    "deleted_at" DATETIME NULL,
     "scheduled_delete_at" DATETIME NULL,
 
     -- Name must be unique

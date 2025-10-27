@@ -102,7 +102,7 @@ impl Handler for DescribeSecretHandler {
         Ok(DescribeSecretResponse {
             arn: secret.arn,
             created_date: secret.created_at.timestamp(),
-            deleted_date: secret.delete_at.map(|value| value.timestamp()),
+            deleted_date: secret.deleted_at.map(|value| value.timestamp()),
             kms_key_id: None,
             last_accessed_date: most_recently_used.map(|value| value.timestamp()),
             last_changed_date: last_changed_date.map(|value| value.timestamp()),
