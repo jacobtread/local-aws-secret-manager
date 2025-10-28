@@ -4,6 +4,7 @@ use aws_sdk_secretsmanager::{
     primitives::Blob,
     types::{Tag, error::InvalidRequestException},
 };
+use loker::database::secrets::get_secret_versions;
 
 use crate::common::test_server;
 
@@ -214,4 +215,60 @@ async fn test_put_secret_value_both_secret_type_error() {
         PutSecretValueError::InvalidRequestException(error) => error,
         error => panic!("expected PutSecretValueError::InvalidRequestException got {error:?}"),
     };
+}
+
+/// Tests that secret stages are updated correctly between PutSecretValue calls
+#[tokio::test]
+async fn test_update_secret_version_stage() {
+    let (client, server) = test_server().await;
+
+    let create_response = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    let version_2 = client
+        .put_secret_value()
+        .secret_id("test")
+        .secret_string("test-2")
+        .send()
+        .await
+        .unwrap();
+
+    let version_3 = client
+        .put_secret_value()
+        .secret_id("test")
+        .secret_string("test-3")
+        .send()
+        .await
+        .unwrap();
+
+    let versions = get_secret_versions(&server.db, create_response.arn().unwrap())
+        .await
+        .unwrap();
+
+    let initial_version = versions
+        .iter()
+        .find(|version| version.version_id == create_response.version_id().unwrap());
+    let version_2 = versions
+        .iter()
+        .find(|version| version.version_id == version_2.version_id().unwrap());
+    let version_3 = versions
+        .iter()
+        .find(|version| version.version_id == version_3.version_id().unwrap());
+
+    // Initial version should have no version stages
+    assert!(initial_version.unwrap().version_stages.is_empty());
+    assert_eq!(
+        version_2.unwrap().version_stages,
+        vec!["AWSPREVIOUS".to_string()]
+    );
+    assert_eq!(
+        version_3.unwrap().version_stages,
+        vec!["AWSCURRENT".to_string()]
+    );
 }
