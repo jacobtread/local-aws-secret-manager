@@ -3,7 +3,8 @@ use crate::{
         DbPool,
         secrets::{
             CreateSecretVersion, VersionStage, create_secret_version, get_secret_latest_version,
-            mark_secret_versions_previous, update_secret_description,
+            mark_secret_previous_versions_deprecated, set_secret_version_stage,
+            update_secret_description,
         },
     },
     handlers::{
@@ -98,8 +99,28 @@ impl Handler for UpdateSecretHandler {
                 // Generate a new version ID if none was provided
                 .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-            // Mark previous versions as non current
-            if let Err(error) = mark_secret_versions_previous(t.deref_mut(), &secret.arn).await {
+            // Mark the existing previous version as deprecated
+            if let Err(error) =
+                mark_secret_previous_versions_deprecated(t.deref_mut(), &secret.arn).await
+            {
+                // Rollback the transaction on failure
+                if let Err(error) = t.rollback().await {
+                    tracing::error!(?error, "failed to rollback transaction");
+                }
+
+                tracing::error!(?error, name = %secret.name, "failed to deprecate old previous secret");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+
+            // Mark the current version as the previous
+            if let Err(error) = set_secret_version_stage(
+                t.deref_mut(),
+                &secret.arn,
+                &secret.version_id,
+                Some(VersionStage::Previous),
+            )
+            .await
+            {
                 // Rollback the transaction on failure
                 if let Err(error) = t.rollback().await {
                     tracing::error!(?error, "failed to rollback transaction");

@@ -249,14 +249,8 @@ async fn test_get_secret_value_by_arn_with_version_when_multiple_string_success(
     // Retrieved version should match created
     assert_eq!(get_response.version_id(), create_response.version_id());
 
-    // Created secret should be in the AWSPREVIOUS version stage
-    assert_eq!(
-        get_response
-            .version_stages()
-            .first()
-            .map(|value| value.as_ref()),
-        Some("AWSPREVIOUS")
-    );
+    // The original created secret should be in the deprecated/None version stage
+    assert_eq!(get_response.version_stages().first(), None);
 }
 
 /// Tests that a string secret can be retrieved by ARN using the AWSCURRENT version stage

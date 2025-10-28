@@ -47,7 +47,7 @@ pub struct GetSecretValueResponse {
     #[serde(rename = "VersionId")]
     version_id: String,
     #[serde(rename = "VersionStages")]
-    version_stages: Vec<VersionStage>,
+    version_stages: Vec<String>,
 }
 
 impl Handler for GetSecretValueHandler {
@@ -117,7 +117,7 @@ impl Handler for GetSecretValueHandler {
             secret_string: secret.secret_string,
             secret_binary: secret.secret_binary,
             version_id: secret.version_id,
-            version_stages: vec![secret.version_stage],
+            version_stages: secret.version_stage.into_iter().collect(),
         })
     }
 }

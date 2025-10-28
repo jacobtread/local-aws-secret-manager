@@ -17,8 +17,7 @@ pub struct StoredSecret {
     pub scheduled_delete_at: Option<DateTime<Utc>>,
     //
     pub version_id: String,
-    #[sqlx(try_from = "String")]
-    pub version_stage: VersionStage,
+    pub version_stage: Option<String>,
     //
     pub description: Option<String>,
     pub secret_string: Option<String>,
@@ -246,18 +245,43 @@ pub async fn remove_secret_tag(
     Ok(())
 }
 
-/// Updates all versions of a secret by ARN ensuring they are marked as the [VersionStage::Previous]
-/// version in preparation for a new secret being inserted
-pub async fn mark_secret_versions_previous(db: impl DbExecutor<'_>, arn: &str) -> DbResult<()> {
+/// Updates the version of a secret that was previously marked AWSPREVIOUS to
+/// NULL to represent the "deprecated" secret that no longer has a stage
+pub async fn mark_secret_previous_versions_deprecated(
+    db: impl DbExecutor<'_>,
+    arn: &str,
+) -> DbResult<()> {
+    sqlx::query(
+        r#"
+        UPDATE "secrets_versions"
+        SET "version_stage" = NULL
+        WHERE "secret_arn" = ? AND "version_stage" = ?
+    "#,
+    )
+    .bind(arn)
+    .bind(VersionStage::Previous.to_string())
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn set_secret_version_stage(
+    db: impl DbExecutor<'_>,
+    arn: &str,
+    version_id: &str,
+    version_stage: Option<VersionStage>,
+) -> DbResult<()> {
     sqlx::query(
         r#"
         UPDATE "secrets_versions"
         SET "version_stage" = ?
-        WHERE "secret_arn" = ?
+        WHERE "secret_arn" = ? AND "version_id" = ?
     "#,
     )
-    .bind(VersionStage::Previous.to_string())
+    .bind(version_stage.map(|value| value.to_string()))
     .bind(arn)
+    .bind(version_id)
     .execute(db)
     .await?;
 

@@ -9,7 +9,8 @@ use crate::{
         DbPool,
         secrets::{
             CreateSecretVersion, VersionStage, create_secret_version, get_secret_by_version_id,
-            get_secret_latest_version, mark_secret_versions_previous,
+            get_secret_latest_version, mark_secret_previous_versions_deprecated,
+            set_secret_version_stage,
         },
     },
     handlers::{
@@ -47,7 +48,7 @@ pub struct PutSecretValueResponse {
     #[serde(rename = "VersionId")]
     version_id: String,
     #[serde(rename = "VersionStages")]
-    version_stages: Vec<VersionStage>,
+    version_stages: Vec<String>,
 }
 
 impl Handler for PutSecretValueHandler {
@@ -106,10 +107,25 @@ impl Handler for PutSecretValueHandler {
             }
         };
 
+        // Mark the existing previous version as deprecated
+        if let Err(error) =
+            mark_secret_previous_versions_deprecated(t.deref_mut(), &secret.arn).await
+        {
+            tracing::error!(?error, name = %secret.name, "failed to deprecate old previous secret");
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
+        }
+
         if matches!(version_stage, VersionStage::Current) {
-            // Mark previous versions as non current
-            if let Err(error) = mark_secret_versions_previous(t.deref_mut(), &secret.arn).await {
-                tracing::error!(?error, name = %secret.name, "failed to mark other secret versions as previous");
+            // Mark current version as the previous version
+            if let Err(error) = set_secret_version_stage(
+                t.deref_mut(),
+                &secret.arn,
+                &secret.version_id,
+                Some(VersionStage::Previous),
+            )
+            .await
+            {
+                tracing::error!(?error, name = %secret.name, "failed to mark previous current secret versions as previous");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         }
@@ -165,7 +181,7 @@ impl Handler for PutSecretValueHandler {
                     arn: secret.arn,
                     name: secret.name,
                     version_id: secret.version_id,
-                    version_stages: vec![secret.version_stage],
+                    version_stages: secret.version_stage.into_iter().collect(),
                 });
             }
 
@@ -182,7 +198,7 @@ impl Handler for PutSecretValueHandler {
             arn: secret.arn,
             name: secret.name,
             version_id,
-            version_stages: vec![version_stage],
+            version_stages: vec![version_stage.to_string()],
         })
     }
 }

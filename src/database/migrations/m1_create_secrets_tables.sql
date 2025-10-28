@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS "secrets_versions" (
     -- Secret details
     "secret_arn" TEXT NOT NULL,
     "version_id" TEXT NOT NULL,
-    "version_stage" TEXT NOT NULL,
+    "version_stage" TEXT NULL,
 
     -- Secret Value
     "secret_string" TEXT NULL,
