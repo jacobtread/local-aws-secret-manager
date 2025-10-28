@@ -8,9 +8,8 @@ use crate::{
     database::{
         DbPool,
         secrets::{
-            CreateSecretVersion, VersionStage, create_secret_version, get_secret_by_version_id,
-            get_secret_latest_version, mark_secret_previous_versions_deprecated,
-            set_secret_version_stage,
+            CreateSecretVersion, add_secret_version_stage, create_secret_version,
+            get_secret_by_version_id, get_secret_latest_version, remove_secret_version_stage_any,
         },
     },
     handlers::{
@@ -61,18 +60,17 @@ impl Handler for PutSecretValueHandler {
             // Generate a new version ID if none was provided
             .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-        let version_stages: Vec<VersionStage> = request
-            .version_stages
-            .unwrap_or_default()
-            .into_iter()
-            // TODO: Handle unsupported?
-            .filter_map(|version| VersionStage::try_from(version).ok())
-            .collect();
+        let version_stages = match request.version_stages {
+            Some(value) => {
+                // When specifying version stages must specify at least one
+                if value.is_empty() {
+                    return Err(AwsErrorResponse(InvalidRequestException).into_response());
+                }
 
-        let version_stage = version_stages
-            .first()
-            .copied()
-            .unwrap_or(VersionStage::Current);
+                value
+            }
+            None => vec!["AWSCURRENT".to_string()],
+        };
 
         // Must only specify one of the two
         if request.secret_string.is_some() && request.secret_binary.is_some() {
@@ -107,36 +105,12 @@ impl Handler for PutSecretValueHandler {
             }
         };
 
-        // Mark the existing previous version as deprecated
-        if let Err(error) =
-            mark_secret_previous_versions_deprecated(t.deref_mut(), &secret.arn).await
-        {
-            tracing::error!(?error, name = %secret.name, "failed to deprecate old previous secret");
-            return Err(AwsErrorResponse(InternalServiceError).into_response());
-        }
-
-        if matches!(version_stage, VersionStage::Current) {
-            // Mark current version as the previous version
-            if let Err(error) = set_secret_version_stage(
-                t.deref_mut(),
-                &secret.arn,
-                &secret.version_id,
-                Some(VersionStage::Previous),
-            )
-            .await
-            {
-                tracing::error!(?error, name = %secret.name, "failed to mark previous current secret versions as previous");
-                return Err(AwsErrorResponse(InternalServiceError).into_response());
-            }
-        }
-
         // Create the new secret version
         if let Err(error) = create_secret_version(
             t.deref_mut(),
             CreateSecretVersion {
                 secret_arn: secret.arn.clone(),
                 version_id: version_id.clone(),
-                version_stage,
                 secret_string: request.secret_string.clone(),
                 secret_binary: request.secret_binary.clone(),
             },
@@ -181,12 +155,55 @@ impl Handler for PutSecretValueHandler {
                     arn: secret.arn,
                     name: secret.name,
                     version_id: secret.version_id,
-                    version_stages: secret.version_stage.into_iter().collect(),
+                    version_stages: secret.version_stages,
                 });
             }
 
             tracing::error!(?error, name = %secret.name, "failed to create secret version");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
+        }
+
+        // Add the requested stages
+        for version_stage in &version_stages {
+            if let Err(error) =
+                remove_secret_version_stage_any(t.deref_mut(), &secret.arn, version_stage).await
+            {
+                tracing::error!(?error, name = %secret.name, "failed to remove version stage from secret");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+
+            // If we are re-assigning AWSCURRENT ensure that the previous secret is given AWSPREVIOUS
+            if version_stage == "AWSCURRENT" {
+                // Ensure nobody else has the AWSPREVIOUS stage
+                if let Err(error) =
+                    remove_secret_version_stage_any(t.deref_mut(), &secret.arn, "AWSPREVIOUS").await
+                {
+                    tracing::error!(?error, name = %secret.name, "failed to remove version stage from secret");
+                    return Err(AwsErrorResponse(InternalServiceError).into_response());
+                }
+
+                // Add the AWSPREVIOUS stage to the old current
+                if let Err(error) = add_secret_version_stage(
+                    t.deref_mut(),
+                    &secret.arn,
+                    &secret.version_id,
+                    "AWSPREVIOUS",
+                )
+                .await
+                {
+                    tracing::error!(?error, name = %secret.name, "failed to add AWSPREVIOUS tag to secret");
+                    return Err(AwsErrorResponse(InternalServiceError).into_response());
+                }
+            }
+
+            // Add the requested version stage
+            if let Err(error) =
+                add_secret_version_stage(t.deref_mut(), &secret.arn, &version_id, version_stage)
+                    .await
+            {
+                tracing::error!(?error, name = %secret.name, "failed to add stage to secret");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
         }
 
         if let Err(error) = t.commit().await {
@@ -198,7 +215,7 @@ impl Handler for PutSecretValueHandler {
             arn: secret.arn,
             name: secret.name,
             version_id,
-            version_stages: vec![version_stage.to_string()],
+            version_stages,
         })
     }
 }

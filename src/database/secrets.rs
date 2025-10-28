@@ -1,7 +1,5 @@
-use std::str::FromStr;
-
 use chrono::{DateTime, Days, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::prelude::FromRow;
 
 use crate::database::{DbErr, DbExecutor, DbResult};
@@ -17,7 +15,8 @@ pub struct StoredSecret {
     pub scheduled_delete_at: Option<DateTime<Utc>>,
     //
     pub version_id: String,
-    pub version_stage: Option<String>,
+    #[sqlx(json)]
+    pub version_stages: Vec<String>,
     //
     pub description: Option<String>,
     pub secret_string: Option<String>,
@@ -35,31 +34,14 @@ pub struct SecretVersion {
     pub secret_arn: String,
     //
     pub version_id: String,
-    #[sqlx(try_from = "String")]
-    pub version_stage: VersionStage,
+    #[sqlx(json)]
+    pub version_stages: Vec<String>,
     //
     pub secret_string: Option<String>,
     pub secret_binary: Option<String>,
     //
     pub created_at: DateTime<Utc>,
     pub last_accessed_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Copy, strum::EnumString, strum::Display, Deserialize, Serialize)]
-pub enum VersionStage {
-    #[serde(rename = "AWSCURRENT")]
-    #[strum(serialize = "AWSCURRENT")]
-    Current,
-    #[serde(rename = "AWSPREVIOUS")]
-    #[strum(serialize = "AWSPREVIOUS")]
-    Previous,
-}
-
-impl TryFrom<String> for VersionStage {
-    type Error = strum::ParseError;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        VersionStage::from_str(&value)
-    }
 }
 
 #[derive(Clone, Deserialize)]
@@ -245,53 +227,9 @@ pub async fn remove_secret_tag(
     Ok(())
 }
 
-/// Updates the version of a secret that was previously marked AWSPREVIOUS to
-/// NULL to represent the "deprecated" secret that no longer has a stage
-pub async fn mark_secret_previous_versions_deprecated(
-    db: impl DbExecutor<'_>,
-    arn: &str,
-) -> DbResult<()> {
-    sqlx::query(
-        r#"
-        UPDATE "secrets_versions"
-        SET "version_stage" = NULL
-        WHERE "secret_arn" = ? AND "version_stage" = ?
-    "#,
-    )
-    .bind(arn)
-    .bind(VersionStage::Previous.to_string())
-    .execute(db)
-    .await?;
-
-    Ok(())
-}
-
-pub async fn set_secret_version_stage(
-    db: impl DbExecutor<'_>,
-    arn: &str,
-    version_id: &str,
-    version_stage: Option<VersionStage>,
-) -> DbResult<()> {
-    sqlx::query(
-        r#"
-        UPDATE "secrets_versions"
-        SET "version_stage" = ?
-        WHERE "secret_arn" = ? AND "version_id" = ?
-    "#,
-    )
-    .bind(version_stage.map(|value| value.to_string()))
-    .bind(arn)
-    .bind(version_id)
-    .execute(db)
-    .await?;
-
-    Ok(())
-}
-
 pub struct CreateSecretVersion {
     pub secret_arn: String,
     pub version_id: String,
-    pub version_stage: VersionStage,
     //
     pub secret_string: Option<String>,
     pub secret_binary: Option<String>,
@@ -306,13 +244,12 @@ pub async fn create_secret_version(
 
     sqlx::query(
         r#"
-        INSERT INTO "secrets_versions" ("secret_arn", "version_id", "version_stage", "secret_string", "secret_binary", "created_at")
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO "secrets_versions" ("secret_arn", "version_id", "secret_string", "secret_binary", "created_at")
+        VALUES (?, ?, ?, ?, ?)
         "#,
     )
     .bind(create.secret_arn)
     .bind(create.version_id)
-    .bind(create.version_stage.to_string())
     .bind(create.secret_string)
     .bind(create.secret_binary)
     .bind(now)
@@ -350,7 +287,7 @@ pub async fn get_secret_latest_version(
     db: impl DbExecutor<'_>,
     secret_id: &str,
 ) -> DbResult<Option<StoredSecret>> {
-    get_secret_by_version_stage(db, secret_id, VersionStage::Current).await
+    get_secret_by_version_stage(db, secret_id, "AWSCURRENT").await
 }
 
 /// Get a secret where the name OR arn matches the `secret_id` and there is a version
@@ -365,11 +302,16 @@ pub async fn get_secret_by_version_id(
         SELECT
             "secret".*,
             "secret_version"."version_id",
-            "secret_version"."version_stage",
             "secret_version"."secret_string",
             "secret_version"."secret_binary",
             "secret_version"."created_at" AS "version_created_at",
             "secret_version"."last_accessed_at" AS "version_last_accessed_at",
+            COALESCE((
+                SELECT json_group_array("version_stage"."value")
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            ), '[]') AS "version_stages",
             COALESCE((
                 SELECT json_group_array(
                     json_object(
@@ -397,23 +339,91 @@ pub async fn get_secret_by_version_id(
     .await
 }
 
+pub async fn add_secret_version_stage(
+    db: impl DbExecutor<'_>,
+    secret_arn: &str,
+    version_id: &str,
+    version_stage: &str,
+) -> DbResult<()> {
+    let created_at = Utc::now();
+    sqlx::query(
+        r#"
+        INSERT INTO "secret_version_stages" ("secret_arn", "version_id", "value", "created_at")
+        VALUES (?, ?, ?, ?)
+    "#,
+    )
+    .bind(secret_arn)
+    .bind(version_id)
+    .bind(version_stage)
+    .bind(created_at)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+pub async fn remove_secret_version_stage(
+    db: impl DbExecutor<'_>,
+    secret_arn: &str,
+    version_id: &str,
+    version_stage: &str,
+) -> DbResult<()> {
+    sqlx::query(
+        r#"
+        DELETE FROM "secret_version_stages"
+        WHERE "secret_arn" = ? AND "version_id" = ? AND "value" = ?
+    "#,
+    )
+    .bind(secret_arn)
+    .bind(version_id)
+    .bind(version_stage)
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
+/// Remove a version stage label from any version in a secret
+pub async fn remove_secret_version_stage_any(
+    db: impl DbExecutor<'_>,
+    secret_arn: &str,
+    version_stage: &str,
+) -> DbResult<()> {
+    sqlx::query(
+        r#"
+        DELETE FROM "secret_version_stages"
+        WHERE "secret_arn" = ? AND "value" = ?
+    "#,
+    )
+    .bind(secret_arn)
+    .bind(version_stage)
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
 /// Get a secret where the name OR arn matches the `secret_id` and there is a version
 /// in `version_stage`
 pub async fn get_secret_by_version_stage(
     db: impl DbExecutor<'_>,
     secret_id: &str,
-    version_stage: VersionStage,
+    version_stage: &str,
 ) -> DbResult<Option<StoredSecret>> {
     sqlx::query_as(
         r#"
         SELECT
             "secret".*,
             "secret_version"."version_id",
-            "secret_version"."version_stage",
             "secret_version"."secret_string",
             "secret_version"."secret_binary",
             "secret_version"."created_at" AS "version_created_at",
             "secret_version"."last_accessed_at" AS "version_last_accessed_at",
+            COALESCE((
+                SELECT json_group_array("version_stage"."value")
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            ), '[]') AS "version_stages",
             COALESCE((
                 SELECT json_group_array(
                     json_object(
@@ -429,13 +439,16 @@ pub async fn get_secret_by_version_stage(
         FROM "secrets" "secret"
         JOIN "secrets_versions" "secret_version"
             ON "secret_version"."secret_arn" = "secret"."arn"
-            AND "secret_version"."version_stage" = ?
+        JOIN "secret_version_stages" "version_stage"
+            ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
+            AND "version_stage"."version_id" = "secret_version"."version_id"
+            AND "version_stage"."value" = ?
         WHERE "secret"."name" = ? OR "secret"."arn" = ?
         ORDER BY "secret_version"."created_at" DESC
         LIMIT 1;
     "#,
     )
-    .bind(version_stage.to_string())
+    .bind(version_stage)
     .bind(secret_id)
     .bind(secret_id)
     .fetch_optional(db)
@@ -448,18 +461,23 @@ pub async fn get_secret_by_version_stage_and_id(
     db: impl DbExecutor<'_>,
     secret_id: &str,
     version_id: &str,
-    version_stage: VersionStage,
+    version_stage: &str,
 ) -> DbResult<Option<StoredSecret>> {
     sqlx::query_as(
         r#"
         SELECT
             "secret".*,
             "secret_version"."version_id",
-            "secret_version"."version_stage",
             "secret_version"."secret_string",
             "secret_version"."secret_binary",
             "secret_version"."created_at" AS "version_created_at",
             "secret_version"."last_accessed_at" AS "version_last_accessed_at",
+            COALESCE((
+                SELECT json_group_array("version_stage"."value")
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            ), '[]') AS "version_stages",
             COALESCE((
                 SELECT json_group_array(
                     json_object(
@@ -475,13 +493,16 @@ pub async fn get_secret_by_version_stage_and_id(
         FROM "secrets" "secret"
         JOIN ("secrets_versions" "secret_version" ON "secret_version"."secret_arn" = "secret"."arn")
             AND "secret_version"."version_id" = ?
-            AND "secret_version"."version_stage" = ?
+        JOIN "secret_version_stages" "version_stage"
+            ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
+            AND "version_stage"."version_id" = "secret_version"."version_id"
+            AND "version_stage"."value" = ?
         WHERE "secret"."name" = ? OR "secret"."arn" = ?
         LIMIT 1;
     "#,
     )
     .bind(version_id)
-    .bind(version_stage.to_string())
+    .bind(version_stage)
     .bind(secret_id)
     .bind(secret_id)
     .fetch_optional(db)
@@ -495,7 +516,14 @@ pub async fn get_secret_versions(
 ) -> DbResult<Vec<SecretVersion>> {
     sqlx::query_as(
         r#"
-        SELECT "secret_version".*
+        SELECT
+            "secret_version".*,
+            COALESCE((
+                SELECT json_group_array("version_stage"."value")
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            ), '[]') AS "version_stages"
         FROM "secrets_versions" "secret_version"
         WHERE "secret_version"."secret_arn" = ?
         ORDER BY "secret_version"."created_at" DESC

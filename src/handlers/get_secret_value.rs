@@ -2,7 +2,7 @@ use crate::{
     database::{
         DbPool,
         secrets::{
-            VersionStage, get_secret_by_version_id, get_secret_by_version_stage,
+            get_secret_by_version_id, get_secret_by_version_stage,
             get_secret_by_version_stage_and_id, get_secret_latest_version,
             update_secret_version_last_accessed,
         },
@@ -57,18 +57,9 @@ impl Handler for GetSecretValueHandler {
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let secret_id = request.secret_id;
         let version_id = request.version_id;
-        let version_stage = match request
-            .version_stage
-            .map(VersionStage::try_from)
-            .transpose()
-        {
-            Ok(value) => value,
-            Err(_error) => {
-                return Err(AwsErrorResponse(InvalidRequestException).into_response());
-            }
-        };
+        let version_stage = request.version_stage;
 
-        let secret = match (&version_id, version_stage) {
+        let secret = match (&version_id, &version_stage) {
             (None, None) => get_secret_latest_version(db, &secret_id).await,
             (Some(version_id), Some(version_stage)) => {
                 get_secret_by_version_stage_and_id(db, &secret_id, version_id, version_stage).await
@@ -117,7 +108,7 @@ impl Handler for GetSecretValueHandler {
             secret_string: secret.secret_string,
             secret_binary: secret.secret_binary,
             version_id: secret.version_id,
-            version_stages: secret.version_stage.into_iter().collect(),
+            version_stages: secret.version_stages,
         })
     }
 }

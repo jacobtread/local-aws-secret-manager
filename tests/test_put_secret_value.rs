@@ -4,7 +4,6 @@ use aws_sdk_secretsmanager::{
     primitives::Blob,
     types::{Tag, error::InvalidRequestException},
 };
-use loker::database::secrets::VersionStage;
 
 use crate::common::test_server;
 
@@ -55,10 +54,7 @@ async fn test_put_secret_value_string_secret_success() {
     assert_ne!(put_response.version_id(), create_response.version_id());
 
     // When no stage is present the stage matched should be
-    assert_eq!(
-        put_response.version_stages(),
-        &[VersionStage::Current.to_string()]
-    );
+    assert_eq!(put_response.version_stages(), &["AWSCURRENT".to_string()]);
 
     let get_response = client
         .get_secret_value()
@@ -77,10 +73,7 @@ async fn test_put_secret_value_string_secret_success() {
     assert_eq!(get_response.version_id(), put_response.version_id());
 
     // Should be in the current stage
-    assert_eq!(
-        get_response.version_stages(),
-        &[VersionStage::Current.to_string()]
-    );
+    assert_eq!(get_response.version_stages(), &["AWSCURRENT".to_string()]);
 }
 
 /// Tests that a binary secret can be updated to a new value
@@ -132,10 +125,7 @@ async fn test_put_secret_value_binary_secret_success() {
     assert_ne!(put_response.version_id(), create_response.version_id());
 
     // When no stage is present the stage matched should be
-    assert_eq!(
-        put_response.version_stages(),
-        &[VersionStage::Current.to_string()]
-    );
+    assert_eq!(put_response.version_stages(), &["AWSCURRENT".to_string()]);
 
     let get_response = client
         .get_secret_value()
@@ -154,10 +144,7 @@ async fn test_put_secret_value_binary_secret_success() {
     assert_eq!(get_response.version_id(), put_response.version_id());
 
     // Should be in the current stage
-    assert_eq!(
-        get_response.version_stages(),
-        &[VersionStage::Current.to_string()]
-    );
+    assert_eq!(get_response.version_stages(), &["AWSCURRENT".to_string()]);
 }
 
 /// Tests that not specifying a secret value will error

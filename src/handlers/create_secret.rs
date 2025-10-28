@@ -2,8 +2,8 @@ use crate::{
     database::{
         DbPool,
         secrets::{
-            CreateSecret, CreateSecretVersion, VersionStage, create_secret, create_secret_version,
-            get_secret_by_version_id, put_secret_tag,
+            CreateSecret, CreateSecretVersion, add_secret_version_stage, create_secret,
+            create_secret_version, get_secret_by_version_id, put_secret_tag,
         },
     },
     handlers::{
@@ -159,7 +159,6 @@ impl Handler for CreateSecretHandler {
             CreateSecretVersion {
                 secret_arn: arn.clone(),
                 version_id: version_id.clone(),
-                version_stage: VersionStage::Current,
                 secret_string: request.secret_string.clone(),
                 secret_binary: request.secret_binary.clone(),
             },
@@ -213,6 +212,14 @@ impl Handler for CreateSecretHandler {
             }
 
             tracing::error!(?error, %name, "failed to create secret version");
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
+        }
+
+        // Add the AWSCURRENT stage to the new version
+        if let Err(error) =
+            add_secret_version_stage(t.deref_mut(), &arn, &version_id, "AWSCURRENT").await
+        {
+            tracing::error!(?error, %name, "failed to add AWSPREVIOUS tag to secret");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 

@@ -80,7 +80,6 @@ impl Handler for DeleteSecretHandler {
             match schedule_delete_secret(db, &secret.arn, recovery_window_in_days).await {
                 Ok(value) => value,
                 Err(error) => {
-                    eprintln!("{error:?}");
                     tracing::error!(?error, %secret_id, "failed to mark secret for deletion");
                     return Err(AwsErrorResponse(InternalServiceError).into_response());
                 }

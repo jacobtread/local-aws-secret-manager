@@ -1,7 +1,7 @@
 use crate::{
     database::{
         DbPool,
-        secrets::{VersionStage, get_secret_latest_version, get_secret_versions},
+        secrets::{get_secret_latest_version, get_secret_versions},
     },
     handlers::{
         Handler, Tag,
@@ -59,7 +59,7 @@ pub struct DescribeSecretResponse {
     #[serde(rename = "Tags")]
     tags: Vec<Tag>,
     #[serde(rename = "VersionIdsToStages")]
-    version_ids_to_stages: HashMap<String, Vec<VersionStage>>,
+    version_ids_to_stages: HashMap<String, Vec<String>>,
 }
 
 impl Handler for DescribeSecretHandler {
@@ -105,8 +105,8 @@ impl Handler for DescribeSecretHandler {
             .max();
 
         let version_ids_to_stages = versions
-            .iter()
-            .map(|version| (version.version_id.clone(), vec![version.version_stage]))
+            .into_iter()
+            .map(|version| (version.version_id, version.version_stages))
             .collect();
 
         Ok(DescribeSecretResponse {

@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS "secrets_versions" (
     -- Secret details
     "secret_arn" TEXT NOT NULL,
     "version_id" TEXT NOT NULL,
-    "version_stage" TEXT NULL,
 
     -- Secret Value
     "secret_string" TEXT NULL,
@@ -48,8 +47,25 @@ CREATE TABLE IF NOT EXISTS "secrets_versions" (
 
 -- Fast lookups by ARN + Version ID
 CREATE INDEX IF NOT EXISTS "idx_secrets_versions_version_id" ON "secrets_versions"("secret_arn", "version_id");
--- Fast lookups by ARN + Version Stage
-CREATE INDEX IF NOT EXISTS "idx_secrets_versions_version_stage" ON "secrets_versions"("secret_arn", "version_stage");
+
+CREATE TABLE IF NOT EXISTS "secret_version_stages" (
+    -- Version details
+    "secret_arn" TEXT NOT NULL,
+    "version_id" TEXT NOT NULL,
+
+    -- Stage value
+    "value" TEXT NOT NULL,
+
+    "created_at" TEXT NOT NULL,
+
+    -- Each version can have multiple stages but each stage value should be unique per version
+    PRIMARY KEY ("secret_arn", "version_id", "value"),
+
+    -- Foreign key referencing secrets_versions composite key
+    FOREIGN KEY ("secret_arn", "version_id")
+        REFERENCES "secrets_versions"("secret_arn", "version_id")
+        ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS "secrets_tags" (
     -- Secret details
