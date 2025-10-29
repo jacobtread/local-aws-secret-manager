@@ -988,6 +988,8 @@ pub async fn get_secret_versions_page_allow_deprecated(
 
 /// Takes any secrets with over 100 versions and deletes any secrets that
 /// are over 24h old until there is only 100 versions for each secret
+///
+/// Only allowed to delete versions that don't have a stage
 pub async fn delete_excess_secret_versions(db: impl DbExecutor<'_>) -> DbResult<()> {
     let now = Utc::now();
     let cutoff = now.checked_sub_days(Days::new(1)).ok_or_else(|| {
@@ -1013,6 +1015,12 @@ pub async fn delete_excess_secret_versions(db: impl DbExecutor<'_>) -> DbResult<
             FROM "ranked_versions"
             WHERE "row_number" > 100
               AND "created_at" < ?
+              AND NOT EXISTS (
+                SELECT 1
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+              )
         );
         "#,
     )
