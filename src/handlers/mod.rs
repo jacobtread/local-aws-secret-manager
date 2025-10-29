@@ -27,7 +27,10 @@ use axum::{
 use futures::future::BoxFuture;
 use http_body_util::BodyExt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{collections::HashMap, convert::Infallible, sync::Arc, task::Poll};
+use std::{
+    collections::HashMap, convert::Infallible, fmt::Display, str::FromStr, sync::Arc, task::Poll,
+};
+use thiserror::Error;
 use tower::Service;
 
 pub mod batch_get_secret_value;
@@ -79,6 +82,46 @@ struct Tag {
     key: String,
     #[serde(rename = "Value")]
     value: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Filter {
+    #[serde(rename = "Key")]
+    key: String,
+    #[serde(rename = "Values")]
+    values: Vec<String>,
+}
+
+pub struct PaginationToken {
+    /// Size of each page
+    page_size: i64,
+    /// Page index
+    page_index: i64,
+}
+
+impl Display for PaginationToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.page_size, self.page_index)
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("invalid pagination token")]
+pub struct InvalidPaginationToken;
+
+impl FromStr for PaginationToken {
+    type Err = InvalidPaginationToken;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (page_size, page) = s.split_once(":").ok_or(InvalidPaginationToken)?;
+        let page_size = page_size.parse().map_err(|_| InvalidPaginationToken)?;
+        let page = page.parse().map_err(|_| InvalidPaginationToken)?;
+
+        Ok(PaginationToken {
+            page_size,
+            page_index: page,
+        })
+    }
 }
 
 #[derive(Default)]

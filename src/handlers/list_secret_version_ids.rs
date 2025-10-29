@@ -1,8 +1,6 @@
-use std::{fmt::Display, str::FromStr};
-
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
+use std::str::FromStr;
 use tokio::join;
 
 use crate::{
@@ -15,7 +13,7 @@ use crate::{
         },
     },
     handlers::{
-        Handler,
+        Handler, PaginationToken,
         error::{
             AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceNotFoundException,
@@ -63,38 +61,6 @@ pub struct SecretVersionsListEntry {
     version_id: String,
     #[serde(rename = "VersionStages")]
     version_stages: Vec<String>,
-}
-
-pub struct PaginationToken {
-    /// Size of each page
-    page_size: i64,
-    /// Page index
-    page_index: i64,
-}
-
-impl Display for PaginationToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.page_size, self.page_index)
-    }
-}
-
-#[derive(Debug, Error)]
-#[error("invalid pagination token")]
-pub struct InvalidPaginationToken;
-
-impl FromStr for PaginationToken {
-    type Err = InvalidPaginationToken;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (page_size, page) = s.split_once(":").ok_or(InvalidPaginationToken)?;
-        let page_size = page_size.parse().map_err(|_| InvalidPaginationToken)?;
-        let page = page.parse().map_err(|_| InvalidPaginationToken)?;
-
-        Ok(PaginationToken {
-            page_size,
-            page_index: page,
-        })
-    }
 }
 
 impl Handler for ListSecretVersionIdsHandler {

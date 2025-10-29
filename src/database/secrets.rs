@@ -30,6 +30,42 @@ pub struct StoredSecret {
 }
 
 #[derive(Clone, FromRow)]
+pub struct StoredSecretWithVersionStages {
+    pub arn: String,
+    pub name: String,
+    //
+    pub created_at: DateTime<Utc>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub scheduled_delete_at: Option<DateTime<Utc>>,
+    //
+    pub version_id: String,
+    #[sqlx(json)]
+    pub version_stages: Vec<String>,
+    //
+    pub description: Option<String>,
+    pub secret_string: Option<String>,
+    pub secret_binary: Option<String>,
+    //
+    pub version_created_at: DateTime<Utc>,
+    pub version_last_accessed_at: Option<DateTime<Utc>>,
+    //
+    #[sqlx(json)]
+    pub version_tags: Vec<StoredVersionTags>,
+    //
+    #[sqlx(json)]
+    pub versions: Vec<StoredVersionsListItem>,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct StoredVersionsListItem {
+    pub version_id: String,
+    pub version_stages: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_accessed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, FromRow)]
 pub struct SecretVersion {
     pub secret_arn: String,
     //
@@ -453,6 +489,307 @@ pub async fn get_secret_by_version_stage(
     .bind(secret_id)
     .fetch_optional(db)
     .await
+}
+
+#[derive(Default)]
+pub struct SecretFilter {
+    pub description: Vec<String>,
+    pub name: Vec<String>,
+    pub tag_key: Vec<String>,
+    pub tag_value: Vec<String>,
+    pub all: Vec<String>,
+}
+
+fn push_secret_filter_where(filter: &SecretFilter, query: &mut String) -> Vec<String> {
+    let mut bound_values: Vec<String> = Vec::new();
+
+    // Name filter
+    if !filter.name.is_empty() || !filter.all.is_empty() {
+        query.push_str(" AND (");
+
+        for (i, name) in filter.name.iter().enumerate() {
+            if i > 0 {
+                query.push_str(" OR ");
+            }
+            query.push_str("secret.name LIKE ?");
+            bound_values.push(format!("{}%", name));
+        }
+
+        for (i, name) in filter.all.iter().enumerate() {
+            if i > 0 {
+                query.push_str(" OR ");
+            }
+            query.push_str("secret.name ILIKE ?");
+            bound_values.push(format!("{}%", name));
+        }
+
+        query.push(')');
+    }
+
+    // Description filter
+    if !filter.description.is_empty() || !filter.all.is_empty() {
+        query.push_str(" AND (");
+
+        for (i, desc) in filter.description.iter().enumerate() {
+            if i > 0 {
+                query.push_str(" OR ");
+            }
+            query.push_str("secret.description LIKE ?");
+            bound_values.push(format!("{}%", desc));
+        }
+
+        for (i, desc) in filter.all.iter().enumerate() {
+            if i > 0 {
+                query.push_str(" OR ");
+            }
+            query.push_str("secret.description ILIKE ?");
+            bound_values.push(format!("{}%", desc));
+        }
+
+        query.push(')');
+    }
+
+    // Tag filters
+    if !filter.tag_key.is_empty() || !filter.tag_value.is_empty() || !filter.all.is_empty() {
+        query.push_str(
+            " AND EXISTS (
+                SELECT 1 FROM secrets_tags AS secret_tag
+                WHERE secret_tag.secret_arn = secret_version.secret_arn
+                  AND secret_tag.version_id = secret_version.version_id",
+        );
+
+        if !filter.tag_key.is_empty() || !filter.all.is_empty() {
+            query.push_str(" AND (");
+
+            for (i, key) in filter.tag_key.iter().enumerate() {
+                if i > 0 {
+                    query.push_str(" OR ");
+                }
+                query.push_str("secret_tag.key LIKE ?");
+                bound_values.push(format!("{}%", key));
+            }
+
+            for (i, key) in filter.all.iter().enumerate() {
+                if i > 0 {
+                    query.push_str(" OR ");
+                }
+                query.push_str("secret_tag.key ILIKE ?");
+                bound_values.push(format!("{}%", key));
+            }
+
+            query.push(')');
+        }
+
+        if !filter.tag_value.is_empty() || !filter.all.is_empty() {
+            query.push_str(" AND (");
+
+            for (i, val) in filter.tag_value.iter().enumerate() {
+                if i > 0 {
+                    query.push_str(" OR ");
+                }
+                query.push_str("secret_tag.value LIKE ?");
+                bound_values.push(format!("{}%", val));
+            }
+
+            for (i, val) in filter.all.iter().enumerate() {
+                if i > 0 {
+                    query.push_str(" OR ");
+                }
+                query.push_str("secret_tag.value ILIKE ?");
+                bound_values.push(format!("{}%", val));
+            }
+
+            query.push(')');
+        }
+
+        query.push(')');
+    }
+
+    bound_values
+}
+
+const GET_SECRETS_BY_FILTER_SELECT: &str = r#"
+"secret".*,
+"secret_version"."version_id",
+"secret_version"."secret_string",
+"secret_version"."secret_binary",
+"secret_version"."created_at" AS "version_created_at",
+"secret_version"."last_accessed_at" AS "version_last_accessed_at",
+COALESCE((
+    SELECT json_group_array("version_stage"."value")
+    FROM "secret_version_stages" "version_stage"
+    WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+        AND "version_stage"."version_id" = "secret_version"."version_id"
+), '[]') AS "version_stages",
+COALESCE((
+    SELECT json_group_array(
+        json_object(
+            'key', "secret_tag"."key",
+            'value', "secret_tag"."value",
+            'created_at', "secret_tag"."created_at",
+            'updated_at', "secret_tag"."updated_at"
+        )
+    )
+    FROM "secrets_tags" "secret_tag"
+    WHERE "secret_tag"."secret_arn" = "secret"."arn"
+), '[]') AS "version_tags",
+COALESCE((
+    SELECT json_group_array(
+        json_object(
+            'version_id', "secret_version"."version_id",
+            'version_stages', COALESCE((
+                SELECT json_group_array("version_stage"."value")
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            ), '[]'),
+            'created_at', "secret_version"."created_at",
+            'last_accessed_at', "secret_version"."last_accessed_at"
+        )
+    )
+    FROM "secrets_versions" "secret_version"
+    JOIN "secret_version_stages" "version_stage"
+        ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
+        AND "version_stage"."version_id" = "secret_version"."version_id"
+        AND "version_stage"."value" = 'AWSCURRENT'
+    WHERE "secret_version"."secret_arn" = "secret"."arn"
+), '[]') AS "versions"
+"#;
+
+pub async fn get_secrets_by_filter(
+    db: impl DbExecutor<'_>,
+    filter: &SecretFilter,
+    limit: i64,
+    offset: i64,
+    asc: bool,
+) -> DbResult<Vec<StoredSecretWithVersionStages>> {
+    let mut query = format!(
+        r#"
+        SELECT {GET_SECRETS_BY_FILTER_SELECT}
+        FROM "secrets" "secret"
+        JOIN "secrets_versions" "secret_version" ON "secret_version"."secret_arn" = "secret"."arn"
+        JOIN "secret_version_stages" "version_stage"
+            ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
+            AND "version_stage"."version_id" = "secret_version"."version_id"
+            AND "version_stage"."value" = 'AWSCURRENT'
+        WHERE "secret"."scheduled_delete_at" IS NULL
+    "#
+    );
+
+    let bound_values = push_secret_filter_where(filter, &mut query);
+
+    // Apply ordering
+    if asc {
+        query.push_str(r#" ORDER BY "secret_version"."created_at" ASC "#);
+    } else {
+        query.push_str(r#" ORDER BY "secret_version"."created_at" DESC "#);
+    }
+
+    // Apply pagination
+    query.push_str(r#"LIMIT ? OFFSET ?"#);
+
+    let mut query = sqlx::query_as(&query);
+
+    for bound in bound_values {
+        query = query.bind(bound);
+    }
+
+    query.bind(limit).bind(offset).fetch_all(db).await
+}
+
+pub async fn get_secrets_by_filter_with_deprecated(
+    db: impl DbExecutor<'_>,
+    filter: &SecretFilter,
+    limit: i64,
+    offset: i64,
+    asc: bool,
+) -> DbResult<Vec<StoredSecretWithVersionStages>> {
+    let mut query = format!(
+        r#"
+        SELECT {GET_SECRETS_BY_FILTER_SELECT}
+        FROM "secrets" "secret"
+        JOIN "secrets_versions" "secret_version" ON "secret_version"."secret_arn" = "secret"."arn"
+        JOIN "secret_version_stages" "version_stage"
+            ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
+            AND "version_stage"."version_id" = "secret_version"."version_id"
+            AND "version_stage"."value" = 'AWSCURRENT'
+        WHERE 1=1
+    "#
+    );
+
+    let bound_values = push_secret_filter_where(filter, &mut query);
+
+    // Apply ordering
+    if asc {
+        query.push_str(r#"ORDER BY "secret_version"."created_at" ASC "#);
+    } else {
+        query.push_str(r#"ORDER BY "secret_version"."created_at" DESC "#);
+    }
+
+    // Apply pagination
+    query.push_str(r#"LIMIT ? OFFSET ?"#);
+
+    let mut query = sqlx::query_as(&query);
+
+    for bound in bound_values {
+        query = query.bind(bound);
+    }
+
+    query.bind(limit).bind(offset).fetch_all(db).await
+}
+
+pub async fn get_secrets_count_by_filter(
+    db: impl DbExecutor<'_>,
+    filter: &SecretFilter,
+) -> DbResult<i64> {
+    let mut query = r#"
+        SELECT COUNT(*)
+        FROM "secrets" "secret"
+        JOIN "secrets_versions" "secret_version" ON "secret_version"."secret_arn" = "secret"."arn"
+        JOIN "secret_version_stages" "version_stage"
+            ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
+            AND "version_stage"."version_id" = "secret_version"."version_id"
+            AND "version_stage"."value" = 'AWSCURRENT'
+        WHERE "secret"."scheduled_delete_at" IS NULL
+    "#
+    .to_string();
+
+    let bound_values = push_secret_filter_where(filter, &mut query);
+    let mut query = sqlx::query_as(&query);
+
+    for bound in bound_values {
+        query = query.bind(bound);
+    }
+
+    let (count,): (i64,) = query.fetch_one(db).await?;
+    Ok(count)
+}
+
+pub async fn get_secrets_count_by_filter_with_deprecated(
+    db: impl DbExecutor<'_>,
+    filter: &SecretFilter,
+) -> DbResult<i64> {
+    let mut query = r#"
+        SELECT COUNT(*)
+        FROM "secrets" "secret"
+        JOIN "secrets_versions" "secret_version" ON "secret_version"."secret_arn" = "secret"."arn"
+        JOIN "secret_version_stages" "version_stage"
+            ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
+            AND "version_stage"."version_id" = "secret_version"."version_id"
+            AND "version_stage"."value" = 'AWSCURRENT'
+        WHERE 1=1
+    "#
+    .to_string();
+
+    let bound_values = push_secret_filter_where(filter, &mut query);
+    let mut query = sqlx::query_as(&query);
+
+    for bound in bound_values {
+        query = query.bind(bound);
+    }
+
+    let (count,): (i64,) = query.fetch_one(db).await?;
+    Ok(count)
 }
 
 /// Get a secret where the name OR arn matches the `secret_id` and there is a version
