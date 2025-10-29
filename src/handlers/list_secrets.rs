@@ -160,7 +160,6 @@ impl Handler for ListSecretsHandler {
         let secrets = match secrets {
             Ok(value) => value,
             Err(error) => {
-                eprintln!("{error:?}");
                 tracing::error!(?error, "failed to get secrets");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
