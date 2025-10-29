@@ -1,18 +1,26 @@
-use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
-
 use crate::{
-    database::DbPool,
+    database::{
+        DbPool,
+        secrets::{
+            add_secret_version_stage, get_secret_latest_version, remove_secret_version_stage,
+            remove_secret_version_stage_any,
+        },
+    },
     handlers::{
         Handler,
-        error::{AwsErrorResponse, NotImplemented},
+        error::{
+            AwsErrorResponse, InternalServiceError, InvalidRequestException,
+            ResourceNotFoundException,
+        },
     },
 };
+use axum::response::{IntoResponse, Response};
+use serde::{Deserialize, Serialize};
+use std::ops::DerefMut;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecretVersionStage.html
 pub struct UpdateSecretVersionStageHandler;
 
-#[allow(unused)]
 #[derive(Deserialize)]
 pub struct UpdateSecretVersionStageRequest {
     #[serde(rename = "MoveToVersionId")]
@@ -26,14 +34,118 @@ pub struct UpdateSecretVersionStageRequest {
 }
 
 #[derive(Serialize)]
-pub struct UpdateSecretVersionStageResponse {}
+pub struct UpdateSecretVersionStageResponse {
+    #[serde(rename = "ARN")]
+    arn: String,
+    #[serde(rename = "Name")]
+    name: String,
+}
 
 impl Handler for UpdateSecretVersionStageHandler {
     type Request = UpdateSecretVersionStageRequest;
     type Response = UpdateSecretVersionStageResponse;
 
-    async fn handle(_db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let _secret_id = request.secret_id;
-        Err(AwsErrorResponse(NotImplemented).into_response())
+    async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
+        let secret_id = request.secret_id;
+        let version_stage = request.version_stage;
+
+        let secret = match get_secret_latest_version(db, &secret_id).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(?error, %secret_id, "failed to get secret");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+        };
+
+        let secret = match secret {
+            Some(value) => value,
+            None => return Err(AwsErrorResponse(ResourceNotFoundException).into_response()),
+        };
+
+        let mut t = match db.begin().await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(?error, name = %secret.name, "failed to begin transaction");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+        };
+
+        // Handle removing from a version
+        if let Some(source_version_id) = request.remove_from_version_id {
+            match remove_secret_version_stage(
+                t.deref_mut(),
+                &secret.arn,
+                &source_version_id,
+                &version_stage,
+            )
+            .await
+            {
+                Ok(value) => {
+                    // Secret version didn't have the stage attached
+                    if value < 1 {
+                        return Err(AwsErrorResponse(InvalidRequestException).into_response());
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(?error, name = %secret.name,  "failed to remove secret version stage");
+                    return Err(AwsErrorResponse(InternalServiceError).into_response());
+                }
+            }
+        }
+
+        // If we are re-assigning AWSCURRENT ensure that the previous secret is given AWSPREVIOUS
+        if version_stage == "AWSCURRENT" && request.move_to_version_id.is_some() {
+            // Ensure nobody else has the AWSPREVIOUS stage
+            if let Err(error) =
+                remove_secret_version_stage_any(t.deref_mut(), &secret.arn, "AWSPREVIOUS").await
+            {
+                tracing::error!(?error, name = %secret.name, "failed to remove version stage from secret");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+
+            // Add the AWSPREVIOUS stage to the old current
+            if let Err(error) = add_secret_version_stage(
+                t.deref_mut(),
+                &secret.arn,
+                &secret.version_id,
+                "AWSPREVIOUS",
+            )
+            .await
+            {
+                tracing::error!(?error, name = %secret.name, "failed to add AWSPREVIOUS tag to secret");
+                return Err(AwsErrorResponse(InternalServiceError).into_response());
+            }
+        }
+
+        if let Some(dest_version_id) = request.move_to_version_id
+            && let Err(error) = add_secret_version_stage(
+                t.deref_mut(),
+                &secret.arn,
+                &dest_version_id,
+                &version_stage,
+            )
+            .await
+        {
+            // Version stage is already attached to another version
+            if error
+                .as_database_error()
+                .is_some_and(|error| error.is_unique_violation())
+            {
+                return Err(AwsErrorResponse(InvalidRequestException).into_response());
+            }
+
+            tracing::error!(?error, name = %secret.name,  "failed to remove secret version stage");
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
+        }
+
+        if let Err(error) = t.commit().await {
+            tracing::error!(?error, name = %secret.name,  "failed to commit transaction");
+            return Err(AwsErrorResponse(InternalServiceError).into_response());
+        }
+
+        Ok(UpdateSecretVersionStageResponse {
+            arn: secret.arn,
+            name: secret.name,
+        })
     }
 }

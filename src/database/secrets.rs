@@ -366,8 +366,8 @@ pub async fn remove_secret_version_stage(
     secret_arn: &str,
     version_id: &str,
     version_stage: &str,
-) -> DbResult<()> {
-    sqlx::query(
+) -> DbResult<u64> {
+    let result = sqlx::query(
         r#"
         DELETE FROM "secret_version_stages"
         WHERE "secret_arn" = ? AND "version_id" = ? AND "value" = ?
@@ -379,7 +379,7 @@ pub async fn remove_secret_version_stage(
     .execute(db)
     .await?;
 
-    Ok(())
+    Ok(result.rows_affected())
 }
 
 /// Remove a version stage label from any version in a secret
@@ -387,8 +387,8 @@ pub async fn remove_secret_version_stage_any(
     db: impl DbExecutor<'_>,
     secret_arn: &str,
     version_stage: &str,
-) -> DbResult<()> {
-    sqlx::query(
+) -> DbResult<u64> {
+    let result = sqlx::query(
         r#"
         DELETE FROM "secret_version_stages"
         WHERE "secret_arn" = ? AND "value" = ?
@@ -399,7 +399,7 @@ pub async fn remove_secret_version_stage_any(
     .execute(db)
     .await?;
 
-    Ok(())
+    Ok(result.rows_affected())
 }
 
 /// Get a secret where the name OR arn matches the `secret_id` and there is a version
