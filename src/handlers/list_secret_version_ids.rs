@@ -32,7 +32,7 @@ pub struct ListSecretVersionIdsRequest {
     #[serde(rename = "IncludeDeprecated")]
     include_deprecated: Option<bool>,
     #[serde(rename = "MaxResults")]
-    max_results: Option<i64>,
+    max_results: Option<i32>,
     #[serde(rename = "NextToken")]
     next_token: Option<String>,
     #[serde(rename = "SecretId")]
@@ -68,13 +68,13 @@ pub struct SecretVersionsListEntry {
 pub struct PaginationToken {
     /// Size of each page
     page_size: i64,
-    /// Page number
-    page: i64,
+    /// Page index
+    page_index: i64,
 }
 
 impl Display for PaginationToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.page_size, self.page)
+        write!(f, "{}:{}", self.page_size, self.page_index)
     }
 }
 
@@ -90,7 +90,10 @@ impl FromStr for PaginationToken {
         let page_size = page_size.parse().map_err(|_| InvalidPaginationToken)?;
         let page = page.parse().map_err(|_| InvalidPaginationToken)?;
 
-        Ok(PaginationToken { page_size, page })
+        Ok(PaginationToken {
+            page_size,
+            page_index: page,
+        })
     }
 }
 
@@ -115,12 +118,12 @@ impl Handler for ListSecretVersionIdsHandler {
             .map_err(|_| AwsErrorResponse(InvalidRequestException).into_response())?
             // Default pagination for the first page
             .unwrap_or(PaginationToken {
-                page_size: max_results,
-                page: 0,
+                page_size: max_results as i64,
+                page_index: 0,
             });
 
         // Update the pagination page size to match the max results
-        pagination_token.page_size = max_results;
+        pagination_token.page_size = max_results as i64;
 
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,
@@ -138,7 +141,7 @@ impl Handler for ListSecretVersionIdsHandler {
         let limit = pagination_token.page_size;
         let offset = match pagination_token
             .page_size
-            .checked_mul(pagination_token.page)
+            .checked_mul(pagination_token.page_index)
         {
             Some(value) => value,
             None => {
@@ -177,14 +180,14 @@ impl Handler for ListSecretVersionIdsHandler {
 
         let has_next_page = offset.checked_add(limit).is_some_and(|size| count > size);
 
-        let next_token = match (pagination_token.page.checked_add(1), has_next_page) {
+        let next_token = match (pagination_token.page_index.checked_add(1), has_next_page) {
             // Only provide a next token if the page is computable and we have enough entries to
             // fullfil the request
             (Some(next_page), true) => {
                 //
                 Some(PaginationToken {
                     page_size: pagination_token.page_size,
-                    page: next_page,
+                    page_index: next_page,
                 })
             }
 
