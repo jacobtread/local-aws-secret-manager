@@ -534,6 +534,121 @@ pub async fn get_secret_versions(
     .await
 }
 
+/// Get the total number of versions for the secret
+///
+/// Only includes versions that are not deprecated (Versions with at least one stage attached)
+pub async fn count_secret_versions(db: impl DbExecutor<'_>, secret_arn: &str) -> DbResult<i64> {
+    let (count,): (i64,) = sqlx::query_as(
+        r#"
+        SELECT COUNT(*)
+        FROM "secrets_versions" "secret_version"
+        WHERE "secret_version"."secret_arn" = ?
+            AND EXISTS (
+                SELECT 1
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            )
+    "#,
+    )
+    .bind(secret_arn)
+    .fetch_one(db)
+    .await?;
+
+    Ok(count)
+}
+
+/// Get the total number of versions for the secret
+///
+/// Includes deprecated secrets
+pub async fn count_secret_versions_allow_deprecated(
+    db: impl DbExecutor<'_>,
+    secret_arn: &str,
+) -> DbResult<i64> {
+    let (count,): (i64,) = sqlx::query_as(
+        r#"
+        SELECT COUNT(*)
+        FROM "secrets_versions" "secret_version"
+        WHERE "secret_version"."secret_arn" = ?
+    "#,
+    )
+    .bind(secret_arn)
+    .fetch_one(db)
+    .await?;
+
+    Ok(count)
+}
+
+/// Get a versions page for a secret
+///
+/// Only includes versions that are not deprecated (Versions with at least one stage attached)
+pub async fn get_secret_versions_page(
+    db: impl DbExecutor<'_>,
+    secret_arn: &str,
+    limit: i64,
+    offset: i64,
+) -> DbResult<Vec<SecretVersion>> {
+    sqlx::query_as(
+        r#"
+        SELECT
+            "secret_version".*,
+            COALESCE((
+                SELECT json_group_array("version_stage"."value")
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            ), '[]') AS "version_stages"
+        FROM "secrets_versions" "secret_version"
+        WHERE "secret_version"."secret_arn" = ?
+            AND EXISTS (
+                SELECT 1
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            )
+        ORDER BY "secret_version"."created_at" DESC
+        LIMIT ? OFFSET ?
+    "#,
+    )
+    .bind(secret_arn)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(db)
+    .await
+}
+
+/// Get a versions page for a secret
+///
+/// Includes deprecated versions
+pub async fn get_secret_versions_page_allow_deprecated(
+    db: impl DbExecutor<'_>,
+    secret_arn: &str,
+    limit: i64,
+    offset: i64,
+) -> DbResult<Vec<SecretVersion>> {
+    sqlx::query_as(
+        r#"
+        SELECT
+            "secret_version".*,
+            COALESCE((
+                SELECT json_group_array("version_stage"."value")
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            ), '[]') AS "version_stages"
+        FROM "secrets_versions" "secret_version"
+        WHERE "secret_version"."secret_arn" = ?
+        ORDER BY "secret_version"."created_at" DESC
+        LIMIT ? OFFSET ?
+    "#,
+    )
+    .bind(secret_arn)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(db)
+    .await
+}
+
 /// Takes any secrets with over 100 versions and deletes any secrets that
 /// are over 24h old until there is only 100 versions for each secret
 pub async fn delete_excess_secret_versions(db: impl DbExecutor<'_>) -> DbResult<()> {
