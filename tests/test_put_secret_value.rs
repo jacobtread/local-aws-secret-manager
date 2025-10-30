@@ -219,7 +219,7 @@ async fn test_put_secret_value_both_secret_type_error() {
 
 /// Tests that secret stages are updated correctly between PutSecretValue calls
 #[tokio::test]
-async fn test_update_secret_version_stage() {
+async fn test_put_secret_value_version_stage() {
     let (client, server) = test_server().await;
 
     let create_response = client
@@ -272,3 +272,14 @@ async fn test_update_secret_version_stage() {
         vec!["AWSCURRENT".to_string()]
     );
 }
+
+/// Tests that trying to make the same requesting using a ClientRequestToken for a already
+/// successful version will silently succeed with the existing secret details
+/// rather than error as long as the value matches
+#[tokio::test]
+async fn test_put_secret_value_retry_token() {}
+
+/// Tests that trying to make a second request using the same ClientRequestToken after the
+/// first succeeded but using a different value should error
+#[tokio::test]
+async fn test_put_secret_value_retry_token_different_error() {}

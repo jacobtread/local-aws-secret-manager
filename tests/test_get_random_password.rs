@@ -12,6 +12,7 @@ async fn test_get_random_password_default() {
     // Default length is 32
     assert_eq!(password.len(), 32);
 }
+
 #[tokio::test]
 async fn test_get_random_password_length() {
     let (client, _server) = test_server().await;

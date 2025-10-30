@@ -51,6 +51,11 @@ async fn test_restore_secret_success() {
     assert_eq!(describe_response.deleted_date, None);
 }
 
+/// Tests that restoring a secret thats not scheduled for deletion will
+/// not error
+#[tokio::test]
+async fn test_restore_secret_not_scheduled_success() {}
+
 /// Tests that trying to restore an unknown secret will fail
 #[tokio::test]
 async fn test_restore_secret_unknown_error() {

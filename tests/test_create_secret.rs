@@ -338,3 +338,7 @@ async fn test_create_secret_value_both_secret_type_error() {
         error => panic!("expected CreateSecretError::InvalidRequestException got {error:?}"),
     };
 }
+
+/// Test that specifying tags when creating a secret are created
+#[tokio::test]
+async fn test_create_secret_tags() {}

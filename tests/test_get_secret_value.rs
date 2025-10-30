@@ -453,3 +453,13 @@ async fn test_get_secret_value_by_name_unknown_error() {
         error => panic!("expected GetSecretValueError::ResourceNotFoundException got {error:?}"),
     };
 }
+
+/// Tests that the response should error if the secret is scheduled
+/// for deletion
+#[tokio::test]
+async fn test_get_secret_value_should_error_if_scheduled_for_deletion() {}
+
+/// Tests that after a secret has been retrieved successfully the last
+/// accessed date should be updated
+#[tokio::test]
+async fn test_get_secret_value_last_accessed_updated() {}

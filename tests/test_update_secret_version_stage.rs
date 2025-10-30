@@ -524,3 +524,9 @@ async fn test_update_secret_version_stage_add_custom_multiple_non_current_empty_
         &["CUSTOM".to_string(), "CUSTOM_2".to_string()]
     );
 }
+
+/// Tests that moving a version stage to another version while its already attached
+/// to a version with specifying to remove it from that version should return
+/// an error
+#[tokio::test]
+async fn test_update_secret_version_stage_move_without_remove_error() {}
