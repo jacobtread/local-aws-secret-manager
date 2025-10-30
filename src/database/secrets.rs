@@ -500,6 +500,32 @@ pub struct SecretFilter {
     pub all: Vec<String>,
 }
 
+impl From<Vec<crate::handlers::Filter>> for SecretFilter {
+    fn from(value: Vec<crate::handlers::Filter>) -> Self {
+        let mut filters = SecretFilter::default();
+        for filter in value {
+            match filter.key.as_str() {
+                "description" => {
+                    filters.description.extend(filter.values);
+                }
+                "name" => {
+                    filters.name.extend(filter.values);
+                }
+                "tag-key" => {
+                    filters.tag_key.extend(filter.values);
+                }
+                "tag-value" => {
+                    filters.tag_value.extend(filter.values);
+                }
+                _ => {
+                    filters.all.extend(filter.values);
+                }
+            }
+        }
+        filters
+    }
+}
+
 fn push_secret_filter_where(filter: &SecretFilter, query: &mut String) -> Vec<String> {
     let mut bound_values: Vec<String> = Vec::new();
 

@@ -91,7 +91,6 @@ impl Handler for ListSecretsHandler {
     type Response = ListSecretsResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let mut filters = SecretFilter::default();
         let include_planned_deletion = request.include_planned_deletion.unwrap_or_default();
         let max_results = request.max_results.unwrap_or(100);
         let asc = request.sort_order.is_some_and(|value| value == "asc");
@@ -111,28 +110,7 @@ impl Handler for ListSecretsHandler {
         // Update the pagination page size to match the max results
         pagination_token.page_size = max_results as i64;
 
-        if let Some(request_filters) = request.filters {
-            for filter in request_filters {
-                match filter.key.as_str() {
-                    "description" => {
-                        filters.description.extend(filter.values);
-                    }
-                    "name" => {
-                        filters.name.extend(filter.values);
-                    }
-                    "tag-key" => {
-                        filters.tag_key.extend(filter.values);
-                    }
-                    "tag-value" => {
-                        filters.tag_value.extend(filter.values);
-                    }
-                    _ => {
-                        filters.all.extend(filter.values);
-                    }
-                }
-            }
-        }
-
+        let filters = request.filters.map(SecretFilter::from).unwrap_or_default();
         let limit = pagination_token.page_size;
         let offset = match pagination_token
             .page_size

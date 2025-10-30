@@ -2,17 +2,21 @@ use std::str::FromStr;
 
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use tokio::join;
 
 use crate::{
     database::{
         DbPool,
-        secrets::{get_secret_latest_version, update_secret_version_last_accessed},
+        secrets::{
+            SecretFilter, get_secret_latest_version, get_secrets_by_filter,
+            get_secrets_count_by_filter, update_secret_version_last_accessed,
+        },
     },
     handlers::{
         APIErrorType, Filter, Handler, PaginationToken,
         error::{
             AwsError, AwsErrorResponse, InternalServiceError, InvalidRequestException,
-            NotImplemented, ResourceNotFoundException,
+            ResourceNotFoundException,
         },
     },
     utils::date::datetime_to_f64,
@@ -74,7 +78,7 @@ impl Handler for BatchGetSecretValueHandler {
         let mut next_token: Option<String> = None;
 
         match (request.filters, request.secret_id_list) {
-            (Some(filters), None) => {
+            (Some(request_filters), None) => {
                 let max_results = request.max_results.unwrap_or(20);
 
                 let mut pagination_token = request
@@ -91,6 +95,73 @@ impl Handler for BatchGetSecretValueHandler {
 
                 // Update the pagination page size to match the max results
                 pagination_token.page_size = max_results as i64;
+
+                let filters = SecretFilter::from(request_filters);
+
+                let limit = pagination_token.page_size;
+                let offset = match pagination_token
+                    .page_size
+                    .checked_mul(pagination_token.page_index)
+                {
+                    Some(value) => value,
+                    None => {
+                        // Requested page exceeds the i64 bounds
+                        return Err(AwsErrorResponse(InvalidRequestException).into_response());
+                    }
+                };
+
+                let (secrets, count) = join!(
+                    get_secrets_by_filter(db, &filters, limit, offset, false),
+                    get_secrets_count_by_filter(db, &filters),
+                );
+
+                let secrets = match secrets {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::error!(?error, "failed to get secrets");
+                        return Err(AwsErrorResponse(InternalServiceError).into_response());
+                    }
+                };
+
+                let count = match count {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::error!(?error, "failed to get secrets count");
+                        return Err(AwsErrorResponse(InternalServiceError).into_response());
+                    }
+                };
+
+                let has_next_page = offset.checked_add(limit).is_some_and(|size| count > size);
+
+                next_token = match (pagination_token.page_index.checked_add(1), has_next_page) {
+                    // Only provide a next token if the page is computable and we have enough entries to
+                    // fullfil the request
+                    (Some(next_page), true) => {
+                        //
+                        Some(
+                            PaginationToken {
+                                page_size: pagination_token.page_size,
+                                page_index: next_page,
+                            }
+                            .to_string(),
+                        )
+                    }
+
+                    // No next page
+                    _ => None,
+                };
+
+                for secret in secrets {
+                    secret_values.push(SecretValueEntry {
+                        arn: secret.arn,
+                        created_date: datetime_to_f64(secret.created_at),
+                        name: secret.name,
+                        secret_string: secret.secret_string,
+                        secret_binary: secret.secret_binary,
+                        version_id: secret.version_id,
+                        version_stages: secret.version_stages,
+                    });
+                }
             }
             (None, Some(secret_id_list)) => {
                 for secret_id in secret_id_list {

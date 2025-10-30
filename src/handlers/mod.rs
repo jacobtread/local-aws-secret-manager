@@ -85,11 +85,11 @@ struct Tag {
 }
 
 #[derive(Deserialize, Serialize)]
-struct Filter {
+pub struct Filter {
     #[serde(rename = "Key")]
-    key: String,
+    pub key: String,
     #[serde(rename = "Values")]
-    values: Vec<String>,
+    pub values: Vec<String>,
 }
 
 pub struct PaginationToken {
