@@ -78,6 +78,7 @@ impl Handler for BatchGetSecretValueHandler {
         let mut next_token: Option<String> = None;
 
         match (request.filters, request.secret_id_list) {
+            // Find secret values based on filters
             (Some(request_filters), None) => {
                 let max_results = request.max_results.unwrap_or(20);
 
@@ -163,6 +164,8 @@ impl Handler for BatchGetSecretValueHandler {
                     });
                 }
             }
+
+            // Finding secrets from a list of ARNs / names
             (None, Some(secret_id_list)) => {
                 for secret_id in secret_id_list {
                     let secret = match get_secret_latest_version(db, &secret_id).await {
