@@ -154,11 +154,13 @@ pub async fn get_scheduled_secret_deletions(db: impl DbExecutor<'_>) -> DbResult
 }
 
 /// Delete all secrets that have past their "scheduled_delete_at" date
-pub async fn delete_scheduled_secrets(db: impl DbExecutor<'_>) -> DbResult<()> {
-    let now = Utc::now();
-
+/// deletes anything where the scheduled_delete_at date is less than `before`
+pub async fn delete_scheduled_secrets(
+    db: impl DbExecutor<'_>,
+    before: DateTime<Utc>,
+) -> DbResult<()> {
     sqlx::query(r#"DELETE FROM "secrets" WHERE "scheduled_delete_at" < ?"#)
-        .bind(now)
+        .bind(before)
         .execute(db)
         .await?;
 

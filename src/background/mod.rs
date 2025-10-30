@@ -1,3 +1,4 @@
+use chrono::Utc;
 use futures::StreamExt;
 use scheduler::{SchedulerEventStream, SchedulerQueueEvent};
 
@@ -36,7 +37,8 @@ pub async fn perform_background_tasks(db: DbPool) {
         match event {
             BackgroundEvent::PurgeDeletedSecrets => {
                 tracing::debug!("performing background purge for presigned tasks");
-                if let Err(error) = delete_scheduled_secrets(&db).await {
+                let now = Utc::now();
+                if let Err(error) = delete_scheduled_secrets(&db, now).await {
                     tracing::error!(?error, "failed to performed scheduled secrets deletion")
                 }
             }

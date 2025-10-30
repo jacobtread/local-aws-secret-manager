@@ -6,7 +6,8 @@ use aws_sdk_secretsmanager::{
         error::{InvalidRequestException, ResourceNotFoundException},
     },
 };
-use loker::database::secrets::get_scheduled_secret_deletions;
+use chrono::{Days, Utc};
+use loker::database::secrets::{delete_scheduled_secrets, get_scheduled_secret_deletions};
 
 use crate::common::test_server;
 
@@ -108,6 +109,31 @@ async fn test_delete_secret_scheduled_success() {
     let _exception: InvalidRequestException = match get_error.into_err() {
         GetSecretValueError::InvalidRequestException(error) => error,
         error => panic!("expected GetSecretValueError::InvalidRequestException got {error:?}"),
+    };
+
+    // Run the scheduled deletion logic
+    let now = Utc::now()
+        // Add enough days to be past the expiry
+        .checked_add_days(Days::new(31))
+        .unwrap();
+    delete_scheduled_secrets(&server.db, now).await.unwrap();
+
+    // Attempting to load the secret should give a ResourceNotFoundException
+    let get_error = client
+        .get_secret_value()
+        .secret_id("test")
+        .send()
+        .await
+        .unwrap_err();
+
+    let get_error = match get_error {
+        SdkError::ServiceError(error) => error,
+        error => panic!("expected SdkError::ServiceError got {error:?}"),
+    };
+
+    let _exception: ResourceNotFoundException = match get_error.into_err() {
+        GetSecretValueError::ResourceNotFoundException(error) => error,
+        error => panic!("expected GetSecretValueError::ResourceNotFoundException got {error:?}"),
     };
 }
 
