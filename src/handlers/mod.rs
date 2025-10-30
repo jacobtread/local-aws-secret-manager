@@ -99,6 +99,18 @@ pub struct PaginationToken {
     page_index: i64,
 }
 
+#[derive(Serialize)]
+struct APIErrorType {
+    #[serde(rename = "ErrorCode")]
+    error_code: Option<String>,
+
+    #[serde(rename = "Message")]
+    message: Option<String>,
+
+    #[serde(rename = "SecretId")]
+    secret_id: Option<String>,
+}
+
 impl Display for PaginationToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.page_size, self.page_index)
