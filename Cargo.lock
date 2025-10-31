@@ -1655,6 +1655,7 @@ dependencies = [
  "strum",
  "thiserror",
  "tokio",
+ "tokio-simple-fixed-scheduler",
  "tower",
  "tower-http",
  "tracing",
@@ -2875,6 +2876,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
  "rustls 0.23.33",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-simple-fixed-scheduler"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea688f39155fef3a72c220fdd964d87869c0b3c6ddab60f4a7985695b57b93f"
+dependencies = [
+ "chrono",
+ "futures",
  "tokio",
 ]
 

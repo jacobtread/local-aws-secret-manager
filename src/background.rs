@@ -1,13 +1,10 @@
-use chrono::Utc;
-use futures::StreamExt;
-use scheduler::{SchedulerEventStream, SchedulerQueueEvent};
-
 use crate::database::{
     DbPool,
     secrets::{delete_excess_secret_versions, delete_scheduled_secrets},
 };
-
-mod scheduler;
+use chrono::Utc;
+use futures::StreamExt;
+use tokio_simple_fixed_scheduler::{SchedulerEventStream, SchedulerQueueEvent};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum BackgroundEvent {
