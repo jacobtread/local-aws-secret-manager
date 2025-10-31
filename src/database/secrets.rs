@@ -237,7 +237,7 @@ pub async fn put_secret_tag(
         r#"
         INSERT INTO "secrets_tags" ("secret_arn", "key", "value", "created_at")
         VALUES (?, ?, ?, ?)
-        ON CONFLICT("secret_arn", key)
+        ON CONFLICT("secret_arn", "key")
         DO UPDATE SET
             "value" = "excluded"."value",
             "updated_at" = "excluded"."created_at"

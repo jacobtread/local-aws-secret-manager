@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS "secrets" (
 
 
 -- Fast lookups by ARN
-CREATE INDEX IF NOT EXISTS "idx_secrets_name" ON "secrets"("arn");
+CREATE INDEX IF NOT EXISTS "idx_secrets_arn" ON "secrets"("arn");
 
 -- Fast lookups by name
 CREATE INDEX IF NOT EXISTS "idx_secrets_name" ON "secrets"("name");
@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS "secret_version_stages" (
         ON DELETE CASCADE
 );
 
+-- Fast lookups by ARN + Version ID + Value
+CREATE INDEX IF NOT EXISTS "idx_secrets_versions_stages_value" ON "secrets_versions"("secret_arn", "version_id", "value");
+
 CREATE TABLE IF NOT EXISTS "secrets_tags" (
     -- Secret details
     "secret_arn" TEXT NOT NULL,
@@ -90,4 +93,4 @@ CREATE TABLE IF NOT EXISTS "secrets_tags" (
 );
 
 -- Fast lookups by ARN
-CREATE INDEX IF NOT EXISTS "idx_secrets_tags_version_id" ON "secrets_tags"("secret_arn");
+CREATE INDEX IF NOT EXISTS "idx_secrets_tags_secret_arn" ON "secrets_tags"("secret_arn");
