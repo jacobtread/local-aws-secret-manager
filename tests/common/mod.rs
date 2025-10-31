@@ -77,10 +77,10 @@ pub async fn test_server() -> (aws_sdk_secretsmanager::Client, TestServer) {
         let handlers_service = handlers.into_service();
         let app = Router::new()
             .route_service("/", post_service(handlers_service))
-            .layer(AwsSigV4AuthLayer::new(AwsCredential {
-                access_key_id: TEST_ACCESS_KEY_ID.to_string(),
-                access_key_secret: TEST_ACCESS_KEY_SECRET.to_string(),
-            }))
+            .layer(AwsSigV4AuthLayer::new(AwsCredential::new(
+                TEST_ACCESS_KEY_ID.to_string(),
+                TEST_ACCESS_KEY_SECRET.to_string(),
+            )))
             .layer(Extension(db.clone()));
 
         axum::serve(listener, app).await.unwrap();

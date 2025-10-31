@@ -17,8 +17,17 @@ use thiserror::Error;
 use tower::{Layer, Service};
 
 pub struct AwsCredential {
-    pub access_key_id: String,
-    pub access_key_secret: String,
+    access_key_id: String,
+    access_key_secret: String,
+}
+
+impl AwsCredential {
+    pub fn new(access_key_id: String, access_key_secret: String) -> Self {
+        Self {
+            access_key_id,
+            access_key_secret,
+        }
+    }
 }
 
 /// Middleware provider layer

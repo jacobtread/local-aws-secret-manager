@@ -45,10 +45,7 @@ async fn server() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let credentials = AwsCredential {
-        access_key_id: config.access_key_id,
-        access_key_secret: config.access_key_secret,
-    };
+    let credentials = AwsCredential::new(config.access_key_id, config.access_key_secret);
 
     // Setup database
     let db = database::create_database(config.encryption_key, config.database_path).await?;
