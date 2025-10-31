@@ -60,6 +60,7 @@ impl Handler for UpdateSecretHandler {
     type Request = UpdateSecretRequest;
     type Response = UpdateSecretResponse;
 
+    #[tracing::instrument(skip_all, fields(secret_id = %request.secret_id))]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let UpdateSecretRequest {
             client_request_token,
@@ -81,7 +82,7 @@ impl Handler for UpdateSecretHandler {
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, "failed to get secret");
+                tracing::error!(?error, "failed to get secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -94,7 +95,7 @@ impl Handler for UpdateSecretHandler {
         let mut t = match db.begin().await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, name = %secret.name, "failed to begin transaction");
+                tracing::error!(?error, "failed to begin transaction");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -108,7 +109,7 @@ impl Handler for UpdateSecretHandler {
                 tracing::error!(?error, "failed to rollback transaction");
             }
 
-            tracing::error!(?error, name = %secret.name, "failed to update secret version description");
+            tracing::error!(?error, "failed to update secret version description");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
@@ -143,7 +144,7 @@ impl Handler for UpdateSecretHandler {
                     tracing::error!(?error, "failed to rollback transaction");
                 }
 
-                tracing::error!(?error, name = %secret.name, "failed to create secret version");
+                tracing::error!(?error, "failed to create secret version");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
 
@@ -151,7 +152,7 @@ impl Handler for UpdateSecretHandler {
             if let Err(error) =
                 remove_secret_version_stage_any(t.deref_mut(), &secret.arn, "AWSPREVIOUS").await
             {
-                tracing::error!(?error, name = %secret.name, "failed to deprecate old previous secret");
+                tracing::error!(?error, "failed to deprecate old previous secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
 
@@ -164,7 +165,7 @@ impl Handler for UpdateSecretHandler {
             )
             .await
             {
-                tracing::error!(?error, name = %secret.name, "failed to add AWSPREVIOUS tag to secret");
+                tracing::error!(?error, "failed to add AWSPREVIOUS tag to secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
 
@@ -177,7 +178,7 @@ impl Handler for UpdateSecretHandler {
             )
             .await
             {
-                tracing::error!(?error, name = %secret.name, "failed to remove AWSCURRENT from old version");
+                tracing::error!(?error, "failed to remove AWSCURRENT from old version");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
 
@@ -186,7 +187,7 @@ impl Handler for UpdateSecretHandler {
                 add_secret_version_stage(t.deref_mut(), &secret.arn, &version_id, "AWSCURRENT")
                     .await
             {
-                tracing::error!(?error, name = %secret.name, "failed to add AWSCURRENT tag to secret");
+                tracing::error!(?error, "failed to add AWSCURRENT tag to secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
 
@@ -197,7 +198,7 @@ impl Handler for UpdateSecretHandler {
         };
 
         if let Err(error) = t.commit().await {
-            tracing::error!(?error, name = %secret.name,  "failed to commit transaction");
+            tracing::error!(?error, "failed to commit transaction");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 

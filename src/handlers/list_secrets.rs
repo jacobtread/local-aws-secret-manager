@@ -127,6 +127,7 @@ impl Handler for ListSecretsHandler {
     type Request = ListSecretsRequest;
     type Response = ListSecretsResponse;
 
+    #[tracing::instrument(skip_all)]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let include_planned_deletion = request.include_planned_deletion;
         let max_results = request.max_results;

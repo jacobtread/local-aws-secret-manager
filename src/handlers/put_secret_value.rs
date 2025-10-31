@@ -61,6 +61,7 @@ impl Handler for PutSecretValueHandler {
     type Request = PutSecretValueRequest;
     type Response = PutSecretValueResponse;
 
+    #[tracing::instrument(skip_all, fields(secret_id = %request.secret_id))]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let SecretId(secret_id) = request.secret_id;
         let ClientRequestToken(version_id) = request.client_request_token.unwrap_or_default();
@@ -93,7 +94,7 @@ impl Handler for PutSecretValueHandler {
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, "failed to get secret");
+                tracing::error!(?error, "failed to get secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -106,7 +107,7 @@ impl Handler for PutSecretValueHandler {
         let mut t = match db.begin().await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, name = %secret.name, "failed to begin transaction");
+                tracing::error!(?error, "failed to begin transaction");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -135,7 +136,7 @@ impl Handler for PutSecretValueHandler {
                 let secret = match get_secret_by_version_id(db, &secret.arn, &version_id).await {
                     Ok(value) => value,
                     Err(error) => {
-                        tracing::error!(?error, name = %secret.name,"failed to determine existing version");
+                        tracing::error!(?error, "failed to determine existing version");
                         return Err(AwsErrorResponse(InternalServiceError).into_response());
                     }
                 };
@@ -165,7 +166,7 @@ impl Handler for PutSecretValueHandler {
                 });
             }
 
-            tracing::error!(?error, name = %secret.name, "failed to create secret version");
+            tracing::error!(?error, "failed to create secret version");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
@@ -174,7 +175,7 @@ impl Handler for PutSecretValueHandler {
             if let Err(error) =
                 remove_secret_version_stage_any(t.deref_mut(), &secret.arn, version_stage).await
             {
-                tracing::error!(?error, name = %secret.name, "failed to remove version stage from secret");
+                tracing::error!(?error, "failed to remove version stage from secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
 
@@ -184,7 +185,7 @@ impl Handler for PutSecretValueHandler {
                 if let Err(error) =
                     remove_secret_version_stage_any(t.deref_mut(), &secret.arn, "AWSPREVIOUS").await
                 {
-                    tracing::error!(?error, name = %secret.name, "failed to remove version stage from secret");
+                    tracing::error!(?error, "failed to remove version stage from secret");
                     return Err(AwsErrorResponse(InternalServiceError).into_response());
                 }
 
@@ -197,7 +198,7 @@ impl Handler for PutSecretValueHandler {
                 )
                 .await
                 {
-                    tracing::error!(?error, name = %secret.name, "failed to add AWSPREVIOUS tag to secret");
+                    tracing::error!(?error, "failed to add AWSPREVIOUS tag to secret");
                     return Err(AwsErrorResponse(InternalServiceError).into_response());
                 }
             }
@@ -207,13 +208,13 @@ impl Handler for PutSecretValueHandler {
                 add_secret_version_stage(t.deref_mut(), &secret.arn, &version_id, version_stage)
                     .await
             {
-                tracing::error!(?error, name = %secret.name, "failed to add stage to secret");
+                tracing::error!(?error, "failed to add stage to secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         }
 
         if let Err(error) = t.commit().await {
-            tracing::error!(?error, name = %secret.name,  "failed to commit transaction");
+            tracing::error!(?error, "failed to commit transaction");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 

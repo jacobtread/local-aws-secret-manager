@@ -53,6 +53,7 @@ impl Handler for UpdateSecretVersionStageHandler {
     type Request = UpdateSecretVersionStageRequest;
     type Response = UpdateSecretVersionStageResponse;
 
+    #[tracing::instrument(skip_all, fields(secret_id = %request.secret_id))]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let SecretId(secret_id) = request.secret_id;
         let version_stage = request.version_stage;
@@ -60,7 +61,7 @@ impl Handler for UpdateSecretVersionStageHandler {
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, "failed to get secret");
+                tracing::error!(?error, "failed to get secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -73,7 +74,7 @@ impl Handler for UpdateSecretVersionStageHandler {
         let mut t = match db.begin().await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, name = %secret.name, "failed to begin transaction");
+                tracing::error!(?error, "failed to begin transaction");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -95,7 +96,7 @@ impl Handler for UpdateSecretVersionStageHandler {
                     }
                 }
                 Err(error) => {
-                    tracing::error!(?error, name = %secret.name,  "failed to remove secret version stage");
+                    tracing::error!(?error, "failed to remove secret version stage");
                     return Err(AwsErrorResponse(InternalServiceError).into_response());
                 }
             }
@@ -107,7 +108,7 @@ impl Handler for UpdateSecretVersionStageHandler {
             if let Err(error) =
                 remove_secret_version_stage_any(t.deref_mut(), &secret.arn, "AWSPREVIOUS").await
             {
-                tracing::error!(?error, name = %secret.name, "failed to remove version stage from secret");
+                tracing::error!(?error, "failed to remove version stage from secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
 
@@ -120,7 +121,7 @@ impl Handler for UpdateSecretVersionStageHandler {
             )
             .await
             {
-                tracing::error!(?error, name = %secret.name, "failed to add AWSPREVIOUS tag to secret");
+                tracing::error!(?error, "failed to add AWSPREVIOUS tag to secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         }
@@ -142,12 +143,12 @@ impl Handler for UpdateSecretVersionStageHandler {
                 return Err(AwsErrorResponse(InvalidRequestException).into_response());
             }
 
-            tracing::error!(?error, name = %secret.name,  "failed to remove secret version stage");
+            tracing::error!(?error, "failed to remove secret version stage");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
         if let Err(error) = t.commit().await {
-            tracing::error!(?error, name = %secret.name,  "failed to commit transaction");
+            tracing::error!(?error, "failed to commit transaction");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 

@@ -74,6 +74,7 @@ impl Handler for BatchGetSecretValueHandler {
     type Request = BatchGetSecretValueRequest;
     type Response = BatchGetSecretValueResponse;
 
+    #[tracing::instrument(skip_all)]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let mut errors: Vec<APIErrorType> = Vec::new();
         let mut secret_values: Vec<SecretValueEntry> = Vec::new();

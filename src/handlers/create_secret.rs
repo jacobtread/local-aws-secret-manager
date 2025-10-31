@@ -80,6 +80,7 @@ impl Handler for CreateSecretHandler {
     type Request = CreateSecretRequest;
     type Response = CreateSecretResponse;
 
+    #[tracing::instrument(skip_all, fields(name = %request.name))]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let SecretName(name) = request.name;
 
@@ -109,7 +110,7 @@ impl Handler for CreateSecretHandler {
         let mut t = match db.begin().await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %name, "failed to begin transaction");
+                tracing::error!(?error, "failed to begin transaction");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -137,7 +138,7 @@ impl Handler for CreateSecretHandler {
                 let secret = match get_secret_by_version_id(db, &name, &version_id).await {
                     Ok(value) => value,
                     Err(error) => {
-                        tracing::error!(?error, %name, "failed to determine existing version");
+                        tracing::error!(?error, "failed to determine existing version");
                         return Err(AwsErrorResponse(InternalServiceError).into_response());
                     }
                 };
@@ -166,7 +167,7 @@ impl Handler for CreateSecretHandler {
                 });
             }
 
-            tracing::error!(?error, %name, "failed to create secret");
+            tracing::error!(?error, "failed to create secret");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
@@ -194,7 +195,7 @@ impl Handler for CreateSecretHandler {
                 let secret = match get_secret_by_version_id(db, &arn, &version_id).await {
                     Ok(value) => value,
                     Err(error) => {
-                        tracing::error!(?error, name = %name,"failed to determine existing version");
+                        tracing::error!(?error, "failed to determine existing version");
                         return Err(AwsErrorResponse(InternalServiceError).into_response());
                     }
                 };
@@ -228,7 +229,7 @@ impl Handler for CreateSecretHandler {
                 tracing::error!(?error, "failed to rollback transaction");
             }
 
-            tracing::error!(?error, %name, "failed to create secret version");
+            tracing::error!(?error, "failed to create secret version");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
@@ -236,7 +237,7 @@ impl Handler for CreateSecretHandler {
         if let Err(error) =
             add_secret_version_stage(t.deref_mut(), &arn, &version_id, "AWSCURRENT").await
         {
-            tracing::error!(?error, %name, "failed to add AWSPREVIOUS tag to secret");
+            tracing::error!(?error, "failed to add AWSPREVIOUS tag to secret");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
@@ -254,7 +255,7 @@ impl Handler for CreateSecretHandler {
         }
 
         if let Err(error) = t.commit().await {
-            tracing::error!(?error, %name, "failed to commit transaction");
+            tracing::error!(?error, "failed to commit transaction");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 

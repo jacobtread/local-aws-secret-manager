@@ -88,6 +88,7 @@ impl Handler for ListSecretVersionIdsHandler {
     type Request = ListSecretVersionIdsRequest;
     type Response = ListSecretVersionIdsResponse;
 
+    #[tracing::instrument(skip_all, fields(secret_id = %request.secret_id))]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let SecretId(secret_id) = request.secret_id;
         let include_deprecated = request.include_deprecated;
@@ -101,7 +102,7 @@ impl Handler for ListSecretVersionIdsHandler {
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, "failed to get secret");
+                tracing::error!(?error, "failed to get secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -138,7 +139,7 @@ impl Handler for ListSecretVersionIdsHandler {
         let versions = match versions {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, "failed to get versions");
+                tracing::error!(?error, "failed to get versions");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -146,7 +147,7 @@ impl Handler for ListSecretVersionIdsHandler {
         let count = match count {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, "failed to get versions count");
+                tracing::error!(?error, "failed to get versions count");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };

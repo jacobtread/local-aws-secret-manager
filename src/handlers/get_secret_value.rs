@@ -60,6 +60,7 @@ impl Handler for GetSecretValueHandler {
     type Request = GetSecretValueRequest;
     type Response = GetSecretValueResponse;
 
+    #[tracing::instrument(skip_all, fields(secret_id = %request.secret_id))]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let SecretId(secret_id) = request.secret_id;
         let version_id = request.version_id.map(VersionId::into_inner);
@@ -79,7 +80,7 @@ impl Handler for GetSecretValueHandler {
         let secret = match secret {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, ?version_id, ?version_stage, "failed to get secret value");
+                tracing::error!(?error, "failed to get secret value");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -97,7 +98,7 @@ impl Handler for GetSecretValueHandler {
         if let Err(error) =
             update_secret_version_last_accessed(db, &secret.arn, &secret.version_id).await
         {
-            tracing::error!(?error, name = %secret.name, "failed to update secret last accessed");
+            tracing::error!(?error, "failed to update secret last accessed");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 

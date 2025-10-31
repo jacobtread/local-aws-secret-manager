@@ -82,13 +82,19 @@ pub fn create_handlers() -> HandlerRouter {
         )
 }
 
-#[derive(Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate)]
 #[garde(transparent)]
 pub struct SecretName(
     #[garde(length(min = 1, max = 512))]
     #[garde(custom(is_valid_secret_name))]
     pub String,
 );
+
+impl Display for SecretName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// Checks if the provided value is a valid filter key
 fn is_valid_secret_name(value: &str, _context: &()) -> garde::Result {
@@ -116,9 +122,15 @@ impl Default for ClientRequestToken {
     }
 }
 
-#[derive(Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate)]
 #[garde(transparent)]
 pub struct SecretId(#[garde(length(min = 1, max = 2048))] pub String);
+
+impl Display for SecretId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Deserialize, Validate)]
 #[garde(transparent)]

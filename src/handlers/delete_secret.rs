@@ -52,6 +52,7 @@ impl Handler for DeleteSecretHandler {
     type Request = DeleteSecretRequest;
     type Response = DeleteSecretResponse;
 
+    #[tracing::instrument(skip_all, fields(secret_id = %request.secret_id))]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let DeleteSecretRequest {
             force_delete_without_recovery,
@@ -64,7 +65,7 @@ impl Handler for DeleteSecretHandler {
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, "failed to get secret");
+                tracing::error!(?error, "failed to get secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -85,7 +86,7 @@ impl Handler for DeleteSecretHandler {
 
         let deletion_date = if force_delete_without_recovery {
             if let Err(error) = delete_secret(db, &secret.arn).await {
-                tracing::error!(?error, %secret_id, "failed to delete secret");
+                tracing::error!(?error, "failed to delete secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
 
@@ -95,7 +96,7 @@ impl Handler for DeleteSecretHandler {
             match schedule_delete_secret(db, &secret.arn, recovery_window_in_days).await {
                 Ok(value) => value,
                 Err(error) => {
-                    tracing::error!(?error, %secret_id, "failed to mark secret for deletion");
+                    tracing::error!(?error, "failed to mark secret for deletion");
                     return Err(AwsErrorResponse(InternalServiceError).into_response());
                 }
             }

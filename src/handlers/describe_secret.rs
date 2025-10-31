@@ -68,13 +68,14 @@ impl Handler for DescribeSecretHandler {
     type Request = DescribeSecretRequest;
     type Response = DescribeSecretResponse;
 
+    #[tracing::instrument(skip_all, fields(secret_id = %request.secret_id))]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let SecretId(secret_id) = request.secret_id;
 
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, "failed to get secret");
+                tracing::error!(?error, "failed to get secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -87,7 +88,7 @@ impl Handler for DescribeSecretHandler {
         let versions = match get_secret_versions(db, &secret.arn).await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, "failed to get secret versions");
+                tracing::error!(?error, "failed to get secret versions");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };

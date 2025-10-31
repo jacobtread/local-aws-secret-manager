@@ -67,6 +67,7 @@ impl Handler for GetRandomPasswordHandler {
     type Request = GetRandomPasswordRequest;
     type Response = GetRandomPasswordResponse;
 
+    #[tracing::instrument(skip_all)]
     async fn handle(_db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let GetRandomPasswordRequest {
             exclude_characters,

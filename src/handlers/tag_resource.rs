@@ -34,6 +34,7 @@ impl Handler for TagResourceHandler {
     type Request = TagResourceRequest;
     type Response = TagResourceResponse;
 
+    #[tracing::instrument(skip_all, fields(secret_id = %request.secret_id))]
     async fn handle(
         db: &DbPool,
         request: Self::Request,
@@ -44,7 +45,7 @@ impl Handler for TagResourceHandler {
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, %secret_id, "failed to get secret");
+                tracing::error!(?error, "failed to get secret");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -57,7 +58,7 @@ impl Handler for TagResourceHandler {
         let mut t = match db.begin().await {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(?error, name = %secret.name, "failed to begin transaction");
+                tracing::error!(?error, "failed to begin transaction");
                 return Err(AwsErrorResponse(InternalServiceError).into_response());
             }
         };
@@ -78,7 +79,7 @@ impl Handler for TagResourceHandler {
         }
 
         if let Err(error) = t.commit().await {
-            tracing::error!(?error, name = %secret.name,  "failed to commit transaction");
+            tracing::error!(?error, "failed to commit transaction");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
