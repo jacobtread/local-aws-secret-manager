@@ -2,7 +2,10 @@ use chrono::{DateTime, Days, Utc};
 use serde::Deserialize;
 use sqlx::prelude::FromRow;
 
-use crate::database::{DbErr, DbExecutor, DbResult};
+use crate::{
+    database::{DbErr, DbExecutor, DbResult},
+    handlers::Filter,
+};
 
 #[derive(Clone, FromRow)]
 pub struct StoredSecret {
@@ -493,47 +496,38 @@ pub async fn get_secret_by_version_stage(
     .await
 }
 
-#[derive(Default)]
-pub struct SecretFilter {
-    pub description: Vec<String>,
-    pub name: Vec<String>,
-    pub tag_key: Vec<String>,
-    pub tag_value: Vec<String>,
-    pub all: Vec<String>,
-}
+fn split_search_terms(value: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut prev_char: Option<char> = None;
 
-impl From<Vec<crate::handlers::Filter>> for SecretFilter {
-    fn from(value: Vec<crate::handlers::Filter>) -> Self {
-        let mut filters = SecretFilter::default();
-        for filter in value {
-            match filter.key.as_str() {
-                "description" => {
-                    filters.description.extend(filter.values);
-                }
-                "name" => {
-                    filters.name.extend(filter.values);
-                }
-                "tag-key" => {
-                    filters.tag_key.extend(filter.values);
-                }
-                "tag-value" => {
-                    filters.tag_value.extend(filter.values);
-                }
-                "all" => {
-                    for value in filter.values {
-                        filters
-                            .all
-                            .extend(value.split_whitespace().map(|value| value.to_string()));
-                    }
-                }
-                _ => {}
+    for c in value.chars() {
+        if let Some(pc) = prev_char {
+            let split = (pc.is_lowercase() != c.is_lowercase())
+                || (pc.is_uppercase() != c.is_uppercase())
+                || (pc.is_alphabetic() != c.is_alphabetic())
+                || (pc.is_numeric() != c.is_numeric())
+                || (pc.is_alphanumeric() != c.is_alphanumeric())
+                || (pc.is_whitespace() != c.is_whitespace());
+
+            if split && !current.is_empty() {
+                words.push(current.clone());
+                current.clear();
             }
         }
-        filters
+
+        current.push(c);
+        prev_char = Some(c);
     }
+
+    if !current.is_empty() {
+        words.push(current);
+    }
+
+    words
 }
 
-fn push_secret_filter_where(filter: &SecretFilter, query: &mut String) -> Vec<String> {
+fn push_secret_filter_where(filters: &[Filter], query: &mut String) -> Vec<String> {
     let mut bound_values: Vec<String> = Vec::new();
 
     fn write_condition_cs<'a, 'b>(
@@ -590,103 +584,107 @@ fn push_secret_filter_where(filter: &SecretFilter, query: &mut String) -> Vec<St
         }
     }
 
-    // Apply "all" filters as part of an initial OR based collect everything query
-    if !filter.all.is_empty() {
-        // All name filter
-        query.push_str("AND ((");
-        write_condition_ci(query, &mut bound_values, r#""secret"."name""#, &filter.all);
+    for filter in filters {
+        match filter.key.as_str() {
+            "all" => {
+                // When querying with all we split the values into search terms
+                let values: Vec<String> = filter
+                    .values
+                    .iter()
+                    .flat_map(|value| split_search_terms(value))
+                    .collect();
 
-        query.push_str(") OR (");
+                // All name filter
+                query.push_str("AND ((");
+                write_condition_ci(query, &mut bound_values, r#""secret"."name""#, &values);
 
-        // All Description filter
-        write_condition_ci(
-            query,
-            &mut bound_values,
-            r#""secret"."description""#,
-            &filter.all,
-        );
+                query.push_str(") OR (");
 
-        // All Tag filters
-        query.push_str(
-            r#") OR EXISTS (
-                SELECT 1 FROM "secrets_tags" AS "secret_tag"
-                WHERE "secret_tag"."secret_arn" = "secret"."arn"
-                AND ((
-            "#,
-        );
+                // All Description filter
+                write_condition_ci(
+                    query,
+                    &mut bound_values,
+                    r#""secret"."description""#,
+                    &values,
+                );
 
-        write_condition_ci(
-            query,
-            &mut bound_values,
-            r#""secret_tag"."key""#,
-            &filter.all,
-        );
+                // All Tag filters
+                query.push_str(
+                    r#") OR EXISTS (
+                    SELECT 1 FROM "secrets_tags" AS "secret_tag"
+                    WHERE "secret_tag"."secret_arn" = "secret"."arn"
+                    AND ((
+                "#,
+                );
 
-        query.push_str(") OR (");
+                write_condition_ci(query, &mut bound_values, r#""secret_tag"."key""#, &values);
 
-        write_condition_ci(
-            query,
-            &mut bound_values,
-            r#""secret_tag"."value""#,
-            &filter.all,
-        );
+                query.push_str(") OR (");
 
-        query.push_str("))))");
-    }
+                write_condition_ci(query, &mut bound_values, r#""secret_tag"."value""#, &values);
 
-    // Name filter
-    if !filter.name.is_empty() {
-        query.push_str(" AND (");
-        write_condition_cs(query, &mut bound_values, r#""secret"."name""#, &filter.name);
-        query.push(')');
-    }
+                query.push_str("))))");
+            }
 
-    // Description filter
-    if !filter.description.is_empty() {
-        query.push_str(" AND (");
-        write_condition_ci(
-            query,
-            &mut bound_values,
-            r#""secret"."description""#,
-            &filter.description,
-        );
-        query.push(')');
-    }
+            "name" => {
+                query.push_str(" AND (");
+                write_condition_cs(
+                    query,
+                    &mut bound_values,
+                    r#""secret"."name""#,
+                    &filter.values,
+                );
+                query.push(')');
+            }
 
-    // Tag filters
-    if !filter.tag_key.is_empty() || !filter.tag_value.is_empty() {
-        query.push_str(
-            r#" AND EXISTS (
-                SELECT 1 FROM "secrets_tags" AS "secret_tag"
-                WHERE "secret_tag"."secret_arn" = "secret"."arn"
-            "#,
-        );
+            "description" => {
+                query.push_str(" AND (");
+                write_condition_ci(
+                    query,
+                    &mut bound_values,
+                    r#""secret"."description""#,
+                    &filter.values,
+                );
+                query.push(')');
+            }
 
-        if !filter.tag_key.is_empty() {
-            query.push_str(" AND (");
-            write_condition_cs(
-                query,
-                &mut bound_values,
-                r#""secret_tag"."key""#,
-                &filter.tag_key,
-            );
+            "tag-key" => {
+                query.push_str(
+                    r#" AND EXISTS (
+                    SELECT 1 FROM "secrets_tags" AS "secret_tag"
+                    WHERE "secret_tag"."secret_arn" = "secret"."arn"
+                    AND (
+                "#,
+                );
 
-            query.push(')');
+                write_condition_cs(
+                    query,
+                    &mut bound_values,
+                    r#""secret_tag"."key""#,
+                    &filter.values,
+                );
+                query.push_str("))");
+            }
+
+            "tag-value" => {
+                query.push_str(
+                    r#" AND EXISTS (
+                    SELECT 1 FROM "secrets_tags" AS "secret_tag"
+                    WHERE "secret_tag"."secret_arn" = "secret"."arn"
+                    AND (
+                "#,
+                );
+                write_condition_cs(
+                    query,
+                    &mut bound_values,
+                    r#""secret_tag"."value""#,
+                    &filter.values,
+                );
+                query.push_str("))");
+            }
+
+            _ => {}
         }
-
-        if !filter.tag_value.is_empty() {
-            query.push_str(" AND (");
-            write_condition_cs(
-                query,
-                &mut bound_values,
-                r#""secret_tag"."value""#,
-                &filter.tag_value,
-            );
-
-            query.push(')');
-        }
-
-        query.push(')');
     }
 
     bound_values
@@ -742,7 +740,7 @@ COALESCE((
 
 pub async fn get_secrets_by_filter(
     db: impl DbExecutor<'_>,
-    filter: &SecretFilter,
+    filters: &[Filter],
     limit: i64,
     offset: i64,
     asc: bool,
@@ -760,7 +758,7 @@ pub async fn get_secrets_by_filter(
     "#
     );
 
-    let bound_values = push_secret_filter_where(filter, &mut query);
+    let bound_values = push_secret_filter_where(filters, &mut query);
 
     // Apply ordering
     if asc {
@@ -783,7 +781,7 @@ pub async fn get_secrets_by_filter(
 
 pub async fn get_secrets_by_filter_with_deprecated(
     db: impl DbExecutor<'_>,
-    filter: &SecretFilter,
+    filters: &[Filter],
     limit: i64,
     offset: i64,
     asc: bool,
@@ -801,7 +799,7 @@ pub async fn get_secrets_by_filter_with_deprecated(
     "#
     );
 
-    let bound_values = push_secret_filter_where(filter, &mut query);
+    let bound_values = push_secret_filter_where(filters, &mut query);
 
     // Apply ordering
     if asc {
@@ -824,7 +822,7 @@ pub async fn get_secrets_by_filter_with_deprecated(
 
 pub async fn get_secrets_count_by_filter(
     db: impl DbExecutor<'_>,
-    filter: &SecretFilter,
+    filters: &[Filter],
 ) -> DbResult<i64> {
     let mut query = r#"
         SELECT COUNT(*)
@@ -838,7 +836,7 @@ pub async fn get_secrets_count_by_filter(
     "#
     .to_string();
 
-    let bound_values = push_secret_filter_where(filter, &mut query);
+    let bound_values = push_secret_filter_where(filters, &mut query);
     let mut query = sqlx::query_as(&query);
 
     for bound in bound_values {
@@ -851,7 +849,7 @@ pub async fn get_secrets_count_by_filter(
 
 pub async fn get_secrets_count_by_filter_with_deprecated(
     db: impl DbExecutor<'_>,
-    filter: &SecretFilter,
+    filters: &[Filter],
 ) -> DbResult<i64> {
     let mut query = r#"
         SELECT COUNT(*)
@@ -865,7 +863,7 @@ pub async fn get_secrets_count_by_filter_with_deprecated(
     "#
     .to_string();
 
-    let bound_values = push_secret_filter_where(filter, &mut query);
+    let bound_values = push_secret_filter_where(filters, &mut query);
     let mut query = sqlx::query_as(&query);
 
     for bound in bound_values {

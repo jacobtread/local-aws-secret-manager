@@ -8,8 +8,8 @@ use crate::{
     database::{
         DbPool,
         secrets::{
-            SecretFilter, get_secret_latest_version, get_secrets_by_filter,
-            get_secrets_count_by_filter, update_secret_version_last_accessed,
+            get_secret_latest_version, get_secrets_by_filter, get_secrets_count_by_filter,
+            update_secret_version_last_accessed,
         },
     },
     handlers::{
@@ -79,7 +79,7 @@ impl Handler for BatchGetSecretValueHandler {
 
         match (request.filters, request.secret_id_list) {
             // Find secret values based on filters
-            (Some(request_filters), None) => {
+            (Some(filters), None) => {
                 let max_results = request.max_results.unwrap_or(20);
 
                 let mut pagination_token = request
@@ -96,8 +96,6 @@ impl Handler for BatchGetSecretValueHandler {
 
                 // Update the pagination page size to match the max results
                 pagination_token.page_size = max_results as i64;
-
-                let filters = SecretFilter::from(request_filters);
 
                 let limit = pagination_token.page_size;
                 let offset = match pagination_token

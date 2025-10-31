@@ -8,7 +8,7 @@ use crate::{
     database::{
         DbPool,
         secrets::{
-            SecretFilter, get_secrets_by_filter, get_secrets_by_filter_with_deprecated,
+            get_secrets_by_filter, get_secrets_by_filter_with_deprecated,
             get_secrets_count_by_filter, get_secrets_count_by_filter_with_deprecated,
         },
     },
@@ -110,7 +110,7 @@ impl Handler for ListSecretsHandler {
         // Update the pagination page size to match the max results
         pagination_token.page_size = max_results as i64;
 
-        let filters = request.filters.map(SecretFilter::from).unwrap_or_default();
+        let filters = request.filters.unwrap_or_default();
         let limit = pagination_token.page_size;
         let offset = match pagination_token
             .page_size
