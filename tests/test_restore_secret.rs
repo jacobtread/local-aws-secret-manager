@@ -54,7 +54,53 @@ async fn test_restore_secret_success() {
 /// Tests that restoring a secret thats not scheduled for deletion will
 /// not error
 #[tokio::test]
-async fn test_restore_secret_not_scheduled_success() {}
+async fn test_restore_secret_not_scheduled_success() {
+    let (client, _server) = test_server().await;
+
+    let create_response = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    let _delete_response = client
+        .delete_secret()
+        .secret_id("test")
+        .send()
+        .await
+        .unwrap();
+
+    let _restore_response = client
+        .restore_secret()
+        .secret_id("test")
+        .send()
+        .await
+        .unwrap();
+
+    let restore_response = client
+        .restore_secret()
+        .secret_id("test")
+        .send()
+        .await
+        .unwrap();
+
+    // Ensure correct response
+    assert_eq!(restore_response.arn(), create_response.arn());
+    assert_eq!(restore_response.name(), create_response.name());
+
+    let describe_response = client
+        .describe_secret()
+        .secret_id("test")
+        .send()
+        .await
+        .unwrap();
+
+    // Secret should not longer have a deletion date
+    assert_eq!(describe_response.deleted_date, None);
+}
 
 /// Tests that trying to restore an unknown secret will fail
 #[tokio::test]
