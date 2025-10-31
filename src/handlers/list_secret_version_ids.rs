@@ -1,11 +1,7 @@
 use crate::{
     database::{
         DbPool,
-        secrets::{
-            count_secret_versions, count_secret_versions_allow_deprecated,
-            get_secret_latest_version, get_secret_versions_page,
-            get_secret_versions_page_allow_deprecated,
-        },
+        secrets::{count_secret_versions, get_secret_latest_version, get_secret_versions_page},
     },
     handlers::{
         Handler, PaginationToken, SecretId,
@@ -113,17 +109,10 @@ impl Handler for ListSecretVersionIdsHandler {
             .as_query_parts()
             .ok_or_else(|| AwsErrorResponse(InvalidRequestException).into_response())?;
 
-        let (versions, count) = if include_deprecated {
-            join!(
-                get_secret_versions_page_allow_deprecated(db, &secret.arn, limit, offset),
-                count_secret_versions_allow_deprecated(db, &secret.arn),
-            )
-        } else {
-            join!(
-                get_secret_versions_page(db, &secret.arn, limit, offset),
-                count_secret_versions(db, &secret.arn),
-            )
-        };
+        let (versions, count) = join!(
+            get_secret_versions_page(db, &secret.arn, include_deprecated, limit, offset),
+            count_secret_versions(db, &secret.arn, include_deprecated),
+        );
 
         let versions = versions.map_err(|error| {
             tracing::error!(?error, "failed to get versions");

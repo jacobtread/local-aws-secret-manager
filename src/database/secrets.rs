@@ -881,42 +881,32 @@ pub async fn get_secret_versions(
 
 /// Get the total number of versions for the secret
 ///
-/// Only includes versions that are not deprecated (Versions with at least one stage attached)
-pub async fn count_secret_versions(db: impl DbExecutor<'_>, secret_arn: &str) -> DbResult<i64> {
-    let (count,): (i64,) = sqlx::query_as(
-        r#"
-        SELECT COUNT(*)
-        FROM "secrets_versions" "secret_version"
-        WHERE "secret_version"."secret_arn" = ?
-            AND EXISTS (
-                SELECT 1
-                FROM "secret_version_stages" "version_stage"
-                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
-                    AND "version_stage"."version_id" = "secret_version"."version_id"
-            )
-    "#,
-    )
-    .bind(secret_arn)
-    .fetch_one(db)
-    .await?;
-
-    Ok(count)
-}
-
-/// Get the total number of versions for the secret
-///
-/// Includes deprecated secrets
-pub async fn count_secret_versions_allow_deprecated(
+/// Does not include versions without at least one attached version stage
+/// unless `include_deprecated` is specified
+pub async fn count_secret_versions(
     db: impl DbExecutor<'_>,
     secret_arn: &str,
+    include_deprecated: bool,
 ) -> DbResult<i64> {
-    let (count,): (i64,) = sqlx::query_as(
+    let (count,): (i64,) = sqlx::query_as(if include_deprecated {
         r#"
-        SELECT COUNT(*)
-        FROM "secrets_versions" "secret_version"
-        WHERE "secret_version"."secret_arn" = ?
-    "#,
-    )
+           SELECT COUNT(*)
+           FROM "secrets_versions" "secret_version"
+           WHERE "secret_version"."secret_arn" = ?
+       "#
+    } else {
+        r#"
+           SELECT COUNT(*)
+           FROM "secrets_versions" "secret_version"
+           WHERE "secret_version"."secret_arn" = ?
+               AND EXISTS (
+                   SELECT 1
+                   FROM "secret_version_stages" "version_stage"
+                   WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                       AND "version_stage"."version_id" = "secret_version"."version_id"
+               )
+       "#
+    })
     .bind(secret_arn)
     .fetch_one(db)
     .await?;
@@ -926,67 +916,52 @@ pub async fn count_secret_versions_allow_deprecated(
 
 /// Get a versions page for a secret
 ///
-/// Only includes versions that are not deprecated (Versions with at least one stage attached)
+/// Does not include versions without at least one attached version stage
+/// unless `include_deprecated` is specified
 pub async fn get_secret_versions_page(
     db: impl DbExecutor<'_>,
     secret_arn: &str,
+    include_deprecated: bool,
     limit: i64,
     offset: i64,
 ) -> DbResult<Vec<SecretVersion>> {
-    sqlx::query_as(
+    sqlx::query_as(if include_deprecated {
         r#"
-        SELECT
-            "secret_version".*,
-            COALESCE((
-                SELECT json_group_array("version_stage"."value")
-                FROM "secret_version_stages" "version_stage"
-                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
-                    AND "version_stage"."version_id" = "secret_version"."version_id"
-            ), '[]') AS "version_stages"
-        FROM "secrets_versions" "secret_version"
-        WHERE "secret_version"."secret_arn" = ?
-            AND EXISTS (
-                SELECT 1
-                FROM "secret_version_stages" "version_stage"
-                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
-                    AND "version_stage"."version_id" = "secret_version"."version_id"
-            )
-        ORDER BY "secret_version"."created_at" DESC
-        LIMIT ? OFFSET ?
-    "#,
-    )
-    .bind(secret_arn)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(db)
-    .await
-}
-
-/// Get a versions page for a secret
-///
-/// Includes deprecated versions
-pub async fn get_secret_versions_page_allow_deprecated(
-    db: impl DbExecutor<'_>,
-    secret_arn: &str,
-    limit: i64,
-    offset: i64,
-) -> DbResult<Vec<SecretVersion>> {
-    sqlx::query_as(
+            SELECT
+                "secret_version".*,
+                COALESCE((
+                    SELECT json_group_array("version_stage"."value")
+                    FROM "secret_version_stages" "version_stage"
+                    WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                        AND "version_stage"."version_id" = "secret_version"."version_id"
+                ), '[]') AS "version_stages"
+            FROM "secrets_versions" "secret_version"
+            WHERE "secret_version"."secret_arn" = ?
+            ORDER BY "secret_version"."created_at" DESC
+            LIMIT ? OFFSET ?
+        "#
+    } else {
         r#"
-        SELECT
-            "secret_version".*,
-            COALESCE((
-                SELECT json_group_array("version_stage"."value")
-                FROM "secret_version_stages" "version_stage"
-                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
-                    AND "version_stage"."version_id" = "secret_version"."version_id"
-            ), '[]') AS "version_stages"
-        FROM "secrets_versions" "secret_version"
-        WHERE "secret_version"."secret_arn" = ?
-        ORDER BY "secret_version"."created_at" DESC
-        LIMIT ? OFFSET ?
-    "#,
-    )
+                SELECT
+                    "secret_version".*,
+                    COALESCE((
+                        SELECT json_group_array("version_stage"."value")
+                        FROM "secret_version_stages" "version_stage"
+                        WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                            AND "version_stage"."version_id" = "secret_version"."version_id"
+                    ), '[]') AS "version_stages"
+                FROM "secrets_versions" "secret_version"
+                WHERE "secret_version"."secret_arn" = ?
+                    AND EXISTS (
+                        SELECT 1
+                        FROM "secret_version_stages" "version_stage"
+                        WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                            AND "version_stage"."version_id" = "secret_version"."version_id"
+                    )
+                ORDER BY "secret_version"."created_at" DESC
+                LIMIT ? OFFSET ?
+            "#
+    })
     .bind(secret_arn)
     .bind(limit)
     .bind(offset)
