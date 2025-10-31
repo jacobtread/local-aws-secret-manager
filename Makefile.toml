@@ -1,0 +1,44 @@
+[env]
+RELEASE_VERSION="0.2.0"
+
+[tasks.docker-publish-alpine]
+command = "docker"
+args = [
+    "buildx",
+    "build",
+    "--platform",
+    "linux/amd64,linux/arm64",
+    "-t",
+    "jacobtread/loker:${RELEASE_VERSION}-alpine-prebuilt",
+    "-t",
+    "jacobtread/loker:latest-alpine-prebuilt",
+    "-f",
+    "./containers/prebuilt.alpine.Dockerfile",
+    "--push",
+    ".",
+    "--build-arg",
+    "GITHUB_RELEASE_VERSION=${RELEASE_VERSION}",
+]
+
+[tasks.docker-publish-bookworm]
+command = "docker"
+args = [
+    "buildx",
+    "build",
+    "--platform",
+    "linux/amd64,linux/arm64",
+    "-t",
+    "jacobtread/loker:${RELEASE_VERSION}-bookworm-prebuilt",
+    "-t",
+    "jacobtread/loker:latest-bookworm-prebuilt",
+    "-t",
+    "jacobtread/loker:${RELEASE_VERSION}",
+    "-t",
+    "jacobtread/loker:latest",
+    "-f",
+    "./containers/prebuilt.alpine.Dockerfile",
+    "--push",
+    ".",
+    "--build-arg",
+    "GITHUB_RELEASE_VERSION=${RELEASE_VERSION}",
+]
