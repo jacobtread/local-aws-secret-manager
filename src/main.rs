@@ -1,4 +1,4 @@
-use axum::{Extension, Router, routing::post_service};
+use axum::{Extension, Router, http::StatusCode, routing::post_service};
 use axum_server::tls_rustls::RustlsConfig;
 use std::{error::Error, net::SocketAddr};
 use tower_http::trace::TraceLayer;
@@ -61,6 +61,7 @@ async fn server() -> Result<(), Box<dyn Error>> {
     let app = Router::new()
         .route_service("/", post_service(handlers_service))
         .layer(AwsSigV4AuthLayer::new(credentials))
+        .route("/health", axum::routing::get(health))
         .layer(Extension(db.clone()))
         .layer(TraceLayer::new_for_http());
 
@@ -98,6 +99,10 @@ async fn server() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+async fn health() -> StatusCode {
+    StatusCode::OK
 }
 
 /// Serve the app over HTTPS
