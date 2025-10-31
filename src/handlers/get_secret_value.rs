@@ -8,7 +8,7 @@ use crate::{
         },
     },
     handlers::{
-        Handler,
+        Handler, SecretId, VersionId,
         error::{
             AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceNotFoundException,
@@ -17,18 +17,24 @@ use crate::{
     utils::date::datetime_to_f64,
 };
 use axum::response::{IntoResponse, Response};
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
 pub struct GetSecretValueHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct GetSecretValueRequest {
     #[serde(rename = "SecretId")]
-    secret_id: String,
+    #[garde(dive)]
+    secret_id: SecretId,
+
     #[serde(rename = "VersionId")]
-    version_id: Option<String>,
+    #[garde(dive)]
+    version_id: Option<VersionId>,
+
     #[serde(rename = "VersionStage")]
+    #[garde(inner(length(min = 1, max = 256)))]
     version_stage: Option<String>,
 }
 
@@ -55,8 +61,8 @@ impl Handler for GetSecretValueHandler {
     type Response = GetSecretValueResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let secret_id = request.secret_id;
-        let version_id = request.version_id;
+        let SecretId(secret_id) = request.secret_id;
+        let version_id = request.version_id.map(VersionId::into_inner);
         let version_stage = request.version_stage;
 
         let secret = match (&version_id, &version_stage) {

@@ -64,6 +64,9 @@ hex = "=0.4.3"
 # Random generation
 rand = "=0.9.2"
 
+# Validation
+garde = { version = "=0.22.0", features = ["derive"] }
+
 [dev-dependencies]
 aws-config = { version = "=1.8.8", features = ["behavior-version-latest"] }
 aws-sdk-secretsmanager = "=1.90.0"

@@ -4,22 +4,24 @@ use crate::{
         secrets::{get_secret_latest_version, get_secret_versions},
     },
     handlers::{
-        Handler, Tag,
+        Handler, SecretId, Tag,
         error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
     },
     utils::date::datetime_to_f64,
 };
 use axum::response::{IntoResponse, Response};
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_DescribeSecret.html
 pub struct DescribeSecretHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct DescribeSecretRequest {
     #[serde(rename = "SecretId")]
-    secret_id: String,
+    #[garde(dive)]
+    secret_id: SecretId,
 }
 
 #[derive(Serialize)]
@@ -67,7 +69,7 @@ impl Handler for DescribeSecretHandler {
     type Response = DescribeSecretResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let secret_id = request.secret_id;
+        let SecretId(secret_id) = request.secret_id;
 
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,

@@ -4,22 +4,26 @@ use crate::{
         secrets::{get_secret_latest_version, put_secret_tag},
     },
     handlers::{
-        Handler, Tag,
+        Handler, SecretId, Tag,
         error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
     },
 };
 use axum::response::IntoResponse;
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 use std::ops::DerefMut;
 
 /// https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_TagResource.html
 pub struct TagResourceHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct TagResourceRequest {
     #[serde(rename = "SecretId")]
-    secret_id: String,
+    #[garde(dive)]
+    secret_id: SecretId,
+
     #[serde(rename = "Tags")]
+    #[garde(dive)]
     tags: Vec<Tag>,
 }
 
@@ -34,7 +38,7 @@ impl Handler for TagResourceHandler {
         db: &DbPool,
         request: Self::Request,
     ) -> Result<Self::Response, axum::response::Response> {
-        let secret_id = request.secret_id;
+        let SecretId(secret_id) = request.secret_id;
         let tags = request.tags;
 
         let secret = match get_secret_latest_version(db, &secret_id).await {

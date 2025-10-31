@@ -1,7 +1,8 @@
-use std::{collections::HashMap, str::FromStr};
-
 use axum::response::{IntoResponse, Response};
+use garde::Validate;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tokio::join;
 
 use crate::{
@@ -19,22 +20,32 @@ use crate::{
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_ListSecrets.html
 pub struct ListSecretsHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct ListSecretsRequest {
     #[serde(rename = "Filters")]
-    filters: Option<Vec<Filter>>,
+    #[serde(default)]
+    #[garde(dive)]
+    filters: Vec<Filter>,
 
     #[serde(rename = "IncludePlannedDeletion")]
-    include_planned_deletion: Option<bool>,
+    #[serde(default)]
+    #[garde(skip)]
+    include_planned_deletion: bool,
 
     #[serde(rename = "MaxResults")]
-    max_results: Option<i32>,
+    #[serde(default = "default_max_results")]
+    #[garde(range(min = 1, max = 100))]
+    max_results: i32,
 
     #[serde(rename = "NextToken")]
-    next_token: Option<String>,
+    #[serde(default = "default_next_token")]
+    #[garde(dive)]
+    next_token: PaginationToken,
 
     #[serde(rename = "SortOrder")]
-    sort_order: Option<String>,
+    #[serde(default = "default_sort_order")]
+    #[garde(custom(is_valid_sort_order))]
+    sort_order: String,
 }
 
 #[derive(Serialize)]
@@ -83,31 +94,50 @@ pub struct SecretListEntry {
     tags: Vec<Tag>,
 }
 
+fn default_sort_order() -> String {
+    "desc".to_string()
+}
+
+fn default_max_results() -> i32 {
+    100
+}
+
+fn default_next_token() -> PaginationToken {
+    PaginationToken {
+        page_size: 100,
+        page_index: 0,
+    }
+}
+
+const VALID_SORT_ORDER: [&str; 2] = ["asc", "desc"];
+
+/// Checks if the provided value is a valid sort order
+fn is_valid_sort_order(value: &str, _context: &()) -> garde::Result {
+    if !VALID_SORT_ORDER.contains(&value) {
+        let expected = VALID_SORT_ORDER.iter().join(", ");
+        return Err(garde::Error::new(format!(
+            "unknown sort order expected one of: {expected}"
+        )));
+    }
+
+    Ok(())
+}
+
 impl Handler for ListSecretsHandler {
     type Request = ListSecretsRequest;
     type Response = ListSecretsResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let include_planned_deletion = request.include_planned_deletion.unwrap_or_default();
-        let max_results = request.max_results.unwrap_or(100);
-        let asc = request.sort_order.is_some_and(|value| value == "asc");
+        let include_planned_deletion = request.include_planned_deletion;
+        let max_results = request.max_results;
+        let filters = request.filters;
+        let asc = request.sort_order == "asc";
 
-        let mut pagination_token = request
-            .next_token
-            .map(|value| PaginationToken::from_str(&value))
-            .transpose()
-            // Invalid pagination token
-            .map_err(|_| AwsErrorResponse(InvalidRequestException).into_response())?
-            // Default pagination for the first page
-            .unwrap_or(PaginationToken {
-                page_size: max_results as i64,
-                page_index: 0,
-            });
+        let mut pagination_token = request.next_token;
 
         // Update the pagination page size to match the max results
         pagination_token.page_size = max_results as i64;
 
-        let filters = request.filters.unwrap_or_default();
         let limit = pagination_token.page_size;
         let offset = match pagination_token
             .page_size

@@ -7,7 +7,7 @@ use crate::{
         },
     },
     handlers::{
-        Handler,
+        Handler, SecretId, VersionId,
         error::{
             AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceNotFoundException,
@@ -15,21 +15,29 @@ use crate::{
     },
 };
 use axum::response::{IntoResponse, Response};
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 use std::ops::DerefMut;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecretVersionStage.html
 pub struct UpdateSecretVersionStageHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct UpdateSecretVersionStageRequest {
     #[serde(rename = "MoveToVersionId")]
-    move_to_version_id: Option<String>,
+    #[garde(dive)]
+    move_to_version_id: Option<VersionId>,
+
     #[serde(rename = "RemoveFromVersionId")]
-    remove_from_version_id: Option<String>,
+    #[garde(dive)]
+    remove_from_version_id: Option<VersionId>,
+
     #[serde(rename = "SecretId")]
-    secret_id: String,
+    #[garde(dive)]
+    secret_id: SecretId,
+
     #[serde(rename = "VersionStage")]
+    #[garde(length(min = 1, max = 256))]
     version_stage: String,
 }
 
@@ -46,7 +54,7 @@ impl Handler for UpdateSecretVersionStageHandler {
     type Response = UpdateSecretVersionStageResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let secret_id = request.secret_id;
+        let SecretId(secret_id) = request.secret_id;
         let version_stage = request.version_stage;
 
         let secret = match get_secret_latest_version(db, &secret_id).await {
@@ -71,7 +79,7 @@ impl Handler for UpdateSecretVersionStageHandler {
         };
 
         // Handle removing from a version
-        if let Some(source_version_id) = request.remove_from_version_id {
+        if let Some(VersionId(source_version_id)) = request.remove_from_version_id {
             match remove_secret_version_stage(
                 t.deref_mut(),
                 &secret.arn,
@@ -117,7 +125,7 @@ impl Handler for UpdateSecretVersionStageHandler {
             }
         }
 
-        if let Some(dest_version_id) = request.move_to_version_id
+        if let Some(VersionId(dest_version_id)) = request.move_to_version_id
             && let Err(error) = add_secret_version_stage(
                 t.deref_mut(),
                 &secret.arn,

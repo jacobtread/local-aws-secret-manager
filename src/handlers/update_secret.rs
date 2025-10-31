@@ -8,7 +8,7 @@ use crate::{
         },
     },
     handlers::{
-        Handler,
+        ClientRequestToken, Handler, SecretBinary, SecretId, SecretString,
         error::{
             AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceNotFoundException,
@@ -16,25 +16,34 @@ use crate::{
     },
 };
 use axum::response::{IntoResponse, Response};
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 use std::ops::DerefMut;
-use uuid::Uuid;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecret.html
 pub struct UpdateSecretHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct UpdateSecretRequest {
     #[serde(rename = "ClientRequestToken")]
-    client_request_token: Option<String>,
+    #[garde(dive)]
+    client_request_token: Option<ClientRequestToken>,
+
     #[serde(rename = "Description")]
+    #[garde(inner(length(max = 2048)))]
     description: Option<String>,
+
     #[serde(rename = "SecretId")]
-    secret_id: String,
+    #[garde(dive)]
+    secret_id: SecretId,
+
     #[serde(rename = "SecretString")]
-    secret_string: Option<String>,
+    #[garde(dive)]
+    secret_string: Option<SecretString>,
+
     #[serde(rename = "SecretBinary")]
-    secret_binary: Option<String>,
+    #[garde(dive)]
+    secret_binary: Option<SecretBinary>,
 }
 
 #[derive(Serialize)]
@@ -52,10 +61,20 @@ impl Handler for UpdateSecretHandler {
     type Response = UpdateSecretResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let secret_id = request.secret_id;
+        let UpdateSecretRequest {
+            client_request_token,
+            description,
+            secret_id,
+            secret_string,
+            secret_binary,
+        } = request;
+
+        let SecretId(secret_id) = secret_id;
+        let secret_string = secret_string.map(SecretString::into_inner);
+        let secret_binary = secret_binary.map(SecretBinary::into_inner);
 
         // Must only specify one of the two
-        if request.secret_string.is_some() && request.secret_binary.is_some() {
+        if secret_string.is_some() && secret_binary.is_some() {
             return Err(AwsErrorResponse(InvalidRequestException).into_response());
         }
 
@@ -80,7 +99,7 @@ impl Handler for UpdateSecretHandler {
             }
         };
 
-        if let Some(description) = request.description
+        if let Some(description) = description
             && let Err(error) =
                 update_secret_description(t.deref_mut(), &secret.arn, &description).await
         {
@@ -93,11 +112,8 @@ impl Handler for UpdateSecretHandler {
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
 
-        let version_id = if request.secret_string.is_some() || request.secret_binary.is_some() {
-            let version_id = request
-                .client_request_token
-                // Generate a new version ID if none was provided
-                .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let version_id = if secret_string.is_some() || secret_binary.is_some() {
+            let ClientRequestToken(version_id) = client_request_token.unwrap_or_default();
 
             // Create a new current secret version
             if let Err(error) = create_secret_version(
@@ -105,8 +121,8 @@ impl Handler for UpdateSecretHandler {
                 CreateSecretVersion {
                     secret_arn: secret.arn.clone(),
                     version_id: version_id.clone(),
-                    secret_string: request.secret_string,
-                    secret_binary: request.secret_binary,
+                    secret_string,
+                    secret_binary,
                 },
             )
             .await

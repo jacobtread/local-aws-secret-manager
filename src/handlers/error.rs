@@ -66,6 +66,13 @@ impl AwsError for InvalidRequestException {
     const MESSAGE: &str = "A parameter value is not valid for the current state of the resource.";
 }
 
+pub struct InvalidParameterException;
+
+impl AwsError for InvalidParameterException {
+    const TYPE: &str = "InvalidParameterException";
+    const MESSAGE: &str = "The parameter name or value is invalid.";
+}
+
 pub struct ResourceNotFoundException;
 
 impl AwsError for ResourceNotFoundException {

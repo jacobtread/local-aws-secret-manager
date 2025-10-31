@@ -1,9 +1,3 @@
-use std::str::FromStr;
-
-use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
-use tokio::join;
-
 use crate::{
     database::{
         DbPool,
@@ -21,22 +15,30 @@ use crate::{
     },
     utils::date::datetime_to_f64,
 };
+use axum::response::{IntoResponse, Response};
+use garde::Validate;
+use serde::{Deserialize, Serialize};
+use tokio::join;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_BatchGetSecretValue.html
 pub struct BatchGetSecretValueHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct BatchGetSecretValueRequest {
     #[serde(rename = "Filters")]
+    #[garde(dive)]
     filters: Option<Vec<Filter>>,
 
     #[serde(rename = "MaxResults")]
+    #[garde(inner(range(min = 1, max = 20)))]
     max_results: Option<i32>,
 
     #[serde(rename = "NextToken")]
-    next_token: Option<String>,
+    #[garde(dive)]
+    next_token: Option<PaginationToken>,
 
     #[serde(rename = "SecretIdList")]
+    #[garde(inner(length(min = 1, max = 20), inner(length(min = 1, max = 2048))))]
     secret_id_list: Option<Vec<String>>,
 }
 
@@ -84,10 +86,6 @@ impl Handler for BatchGetSecretValueHandler {
 
                 let mut pagination_token = request
                     .next_token
-                    .map(|value| PaginationToken::from_str(&value))
-                    .transpose()
-                    // Invalid pagination token
-                    .map_err(|_| AwsErrorResponse(InvalidRequestException).into_response())?
                     // Default pagination for the first page
                     .unwrap_or(PaginationToken {
                         page_size: max_results as i64,

@@ -1,6 +1,6 @@
 use axum::response::{IntoResponse, Response};
+use garde::Validate;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use tokio::join;
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
         },
     },
     handlers::{
-        Handler, PaginationToken,
+        Handler, PaginationToken, SecretId,
         error::{
             AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceNotFoundException,
@@ -25,16 +25,26 @@ use crate::{
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_ListSecretVersionIds.html
 pub struct ListSecretVersionIdsHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct ListSecretVersionIdsRequest {
     #[serde(rename = "IncludeDeprecated")]
-    include_deprecated: Option<bool>,
+    #[serde(default)]
+    #[garde(skip)]
+    include_deprecated: bool,
+
     #[serde(rename = "MaxResults")]
-    max_results: Option<i32>,
+    #[serde(default = "default_max_results")]
+    #[garde(range(min = 1, max = 100))]
+    max_results: i32,
+
     #[serde(rename = "NextToken")]
-    next_token: Option<String>,
+    #[serde(default = "default_next_token")]
+    #[garde(dive)]
+    next_token: PaginationToken,
+
     #[serde(rename = "SecretId")]
-    secret_id: String,
+    #[garde(dive)]
+    secret_id: SecretId,
 }
 
 #[derive(Serialize)]
@@ -63,30 +73,27 @@ pub struct SecretVersionsListEntry {
     version_stages: Vec<String>,
 }
 
+fn default_max_results() -> i32 {
+    100
+}
+
+fn default_next_token() -> PaginationToken {
+    PaginationToken {
+        page_size: 100,
+        page_index: 0,
+    }
+}
+
 impl Handler for ListSecretVersionIdsHandler {
     type Request = ListSecretVersionIdsRequest;
     type Response = ListSecretVersionIdsResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let secret_id = request.secret_id;
+        let SecretId(secret_id) = request.secret_id;
+        let include_deprecated = request.include_deprecated;
+        let max_results = request.max_results;
 
-        // Whether to include secrets without stages
-        let include_deprecated = request.include_deprecated.unwrap_or_default();
-
-        // Maximum results to get (Default to 100)
-        let max_results = request.max_results.unwrap_or(100);
-
-        let mut pagination_token = request
-            .next_token
-            .map(|value| PaginationToken::from_str(&value))
-            .transpose()
-            // Invalid pagination token
-            .map_err(|_| AwsErrorResponse(InvalidRequestException).into_response())?
-            // Default pagination for the first page
-            .unwrap_or(PaginationToken {
-                page_size: max_results as i64,
-                page_index: 0,
-            });
+        let mut pagination_token = request.next_token;
 
         // Update the pagination page size to match the max results
         pagination_token.page_size = max_results as i64;

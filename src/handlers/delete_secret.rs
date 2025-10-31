@@ -4,26 +4,34 @@ use crate::{
         secrets::{delete_secret, get_secret_latest_version, schedule_delete_secret},
     },
     handlers::{
-        Handler,
+        Handler, SecretId,
         error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
     },
     utils::date::datetime_to_f64,
 };
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 
 /// https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_DeleteSecret.html
 pub struct DeleteSecretHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct DeleteSecretRequest {
     #[serde(rename = "ForceDeleteWithoutRecovery")]
-    force_delete_without_recovery: Option<bool>,
+    #[serde(default)]
+    #[garde(skip)]
+    force_delete_without_recovery: bool,
+
     #[serde(rename = "RecoveryWindowInDays")]
-    recovery_window_in_days: Option<i32>,
+    #[serde(default = "default_recovery_window_days")]
+    #[garde(range(min = 7, max = 30))]
+    recovery_window_in_days: i32,
+
     #[serde(rename = "SecretId")]
-    secret_id: String,
+    #[garde(dive)]
+    secret_id: SecretId,
 }
 
 #[derive(Serialize)]
@@ -36,15 +44,22 @@ pub struct DeleteSecretResponse {
     deletion_date: f64,
 }
 
+fn default_recovery_window_days() -> i32 {
+    30
+}
+
 impl Handler for DeleteSecretHandler {
     type Request = DeleteSecretRequest;
     type Response = DeleteSecretResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let force_delete_without_recovery =
-            request.force_delete_without_recovery.unwrap_or_default();
-        let recovery_window_in_days = request.recovery_window_in_days.unwrap_or(30);
-        let secret_id = request.secret_id;
+        let DeleteSecretRequest {
+            force_delete_without_recovery,
+            recovery_window_in_days,
+            secret_id,
+        } = request;
+
+        let SecretId(secret_id) = secret_id;
 
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,

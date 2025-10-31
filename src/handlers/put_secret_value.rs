@@ -1,9 +1,3 @@
-use std::ops::DerefMut;
-
-use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     database::{
         DbPool,
@@ -13,28 +7,41 @@ use crate::{
         },
     },
     handlers::{
-        Handler,
+        ClientRequestToken, Handler, SecretBinary, SecretId, SecretString,
         error::{
             AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceExistsException, ResourceNotFoundException,
         },
     },
 };
+use axum::response::{IntoResponse, Response};
+use garde::Validate;
+use serde::{Deserialize, Serialize};
+use std::ops::DerefMut;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_PutSecretValue.html
 pub struct PutSecretValueHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct PutSecretValueRequest {
     #[serde(rename = "ClientRequestToken")]
-    client_request_token: Option<String>,
+    #[garde(dive)]
+    client_request_token: Option<ClientRequestToken>,
+
     #[serde(rename = "SecretId")]
-    secret_id: String,
+    #[garde(dive)]
+    secret_id: SecretId,
+
     #[serde(rename = "SecretString")]
-    secret_string: Option<String>,
+    #[garde(dive)]
+    secret_string: Option<SecretString>,
+
     #[serde(rename = "SecretBinary")]
-    secret_binary: Option<String>,
+    #[garde(dive)]
+    secret_binary: Option<SecretBinary>,
+
     #[serde(rename = "VersionStages")]
+    #[garde(inner(length(min = 1, max = 20), inner(length(min = 1, max = 256))))]
     version_stages: Option<Vec<String>>,
 }
 
@@ -55,10 +62,8 @@ impl Handler for PutSecretValueHandler {
     type Response = PutSecretValueResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let version_id = request
-            .client_request_token
-            // Generate a new version ID if none was provided
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let SecretId(secret_id) = request.secret_id;
+        let ClientRequestToken(version_id) = request.client_request_token.unwrap_or_default();
 
         let version_stages = match request.version_stages {
             Some(value) => {
@@ -72,17 +77,18 @@ impl Handler for PutSecretValueHandler {
             None => vec!["AWSCURRENT".to_string()],
         };
 
+        let secret_string = request.secret_string.map(SecretString::into_inner);
+        let secret_binary = request.secret_binary.map(SecretBinary::into_inner);
+
         // Must only specify one of the two
-        if request.secret_string.is_some() && request.secret_binary.is_some() {
+        if secret_string.is_some() && secret_binary.is_some() {
             return Err(AwsErrorResponse(InvalidRequestException).into_response());
         }
 
         // Must specify at least one
-        if request.secret_string.is_none() && request.secret_binary.is_none() {
+        if secret_string.is_none() && secret_binary.is_none() {
             return Err(AwsErrorResponse(InvalidRequestException).into_response());
         }
-
-        let secret_id = request.secret_id;
 
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,
@@ -111,8 +117,8 @@ impl Handler for PutSecretValueHandler {
             CreateSecretVersion {
                 secret_arn: secret.arn.clone(),
                 version_id: version_id.clone(),
-                secret_string: request.secret_string.clone(),
-                secret_binary: request.secret_binary.clone(),
+                secret_string: secret_string.clone(),
+                secret_binary: secret_binary.clone(),
             },
         )
         .await
@@ -144,8 +150,8 @@ impl Handler for PutSecretValueHandler {
 
                 // If the stored version data doesn't match this is an error that
                 // the resource already exists
-                if secret.secret_string.ne(&request.secret_string)
-                    || secret.secret_binary.ne(&request.secret_binary)
+                if secret.secret_string.ne(&secret_string)
+                    || secret.secret_binary.ne(&secret_binary)
                 {
                     return Err(AwsErrorResponse(ResourceExistsException).into_response());
                 }

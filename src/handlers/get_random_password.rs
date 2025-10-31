@@ -1,4 +1,5 @@
 use axum::response::{IntoResponse, Response};
+use garde::Validate;
 use rand::seq::{IndexedRandom, SliceRandom};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -14,24 +15,42 @@ use crate::{
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetRandomPassword.html
 pub struct GetRandomPasswordHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
+#[garde(allow_unvalidated)]
 pub struct GetRandomPasswordRequest {
     #[serde(rename = "ExcludeCharacters")]
-    exclude_characters: Option<String>,
+    #[serde(default)]
+    #[garde(length(min = 0, max = 4096))]
+    exclude_characters: String,
+
     #[serde(rename = "ExcludeLowercase")]
-    exclude_lowercase: Option<bool>,
+    #[serde(default)]
+    exclude_lowercase: bool,
+
     #[serde(rename = "ExcludeNumbers")]
-    exclude_numbers: Option<bool>,
+    #[serde(default)]
+    exclude_numbers: bool,
+
     #[serde(rename = "ExcludePunctuation")]
-    exclude_punctuation: Option<bool>,
+    #[serde(default)]
+    exclude_punctuation: bool,
+
     #[serde(rename = "ExcludeUppercase")]
-    exclude_uppercase: Option<bool>,
+    #[serde(default)]
+    exclude_uppercase: bool,
+
     #[serde(rename = "IncludeSpace")]
-    include_space: Option<bool>,
+    #[serde(default)]
+    include_space: bool,
+
     #[serde(rename = "PasswordLength")]
-    password_length: Option<i64>,
+    #[serde(default = "default_password_length")]
+    #[garde(range(min = 1, max = 4096))]
+    password_length: i64,
+
     #[serde(rename = "RequireEachIncludedType")]
-    require_each_included_type: Option<bool>,
+    #[serde(default)]
+    require_each_included_type: bool,
 }
 
 #[derive(Serialize)]
@@ -40,19 +59,25 @@ pub struct GetRandomPasswordResponse {
     random_password: String,
 }
 
+fn default_password_length() -> i64 {
+    32
+}
+
 impl Handler for GetRandomPasswordHandler {
     type Request = GetRandomPasswordRequest;
     type Response = GetRandomPasswordResponse;
 
     async fn handle(_db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let exclude_characters = request.exclude_characters.unwrap_or_default();
-        let exclude_lowercase = request.exclude_lowercase.unwrap_or_default();
-        let exclude_numbers = request.exclude_numbers.unwrap_or_default();
-        let exclude_punctuation = request.exclude_punctuation.unwrap_or_default();
-        let exclude_uppercase = request.exclude_uppercase.unwrap_or_default();
-        let include_space = request.include_space.unwrap_or_default();
-        let password_length = request.password_length.unwrap_or(32);
-        let require_each_included_type = request.require_each_included_type.unwrap_or_default();
+        let GetRandomPasswordRequest {
+            exclude_characters,
+            exclude_lowercase,
+            exclude_numbers,
+            exclude_punctuation,
+            exclude_uppercase,
+            include_space,
+            password_length,
+            require_each_included_type,
+        } = request;
 
         let random_password = match get_random_password(PasswordOptions {
             exclude_characters,

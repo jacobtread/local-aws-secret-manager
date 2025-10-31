@@ -4,22 +4,26 @@ use crate::{
         secrets::{get_secret_latest_version, remove_secret_tag},
     },
     handlers::{
-        Handler,
+        Handler, SecretId,
         error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
     },
 };
 use axum::response::IntoResponse;
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 use std::ops::DerefMut;
 
 /// https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UntagResource.html
 pub struct UntagResourceHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct UntagResourceRequest {
     #[serde(rename = "SecretId")]
-    secret_id: String,
+    #[garde(dive)]
+    secret_id: SecretId,
+
     #[serde(rename = "TagKeys")]
+    #[garde(inner(length(min = 1, max = 128)))]
     tag_keys: Vec<String>,
 }
 
@@ -34,7 +38,7 @@ impl Handler for UntagResourceHandler {
         db: &DbPool,
         request: Self::Request,
     ) -> Result<Self::Response, axum::response::Response> {
-        let secret_id = request.secret_id;
+        let SecretId(secret_id) = request.secret_id;
         let tag_keys = request.tag_keys;
 
         let secret = match get_secret_latest_version(db, &secret_id).await {

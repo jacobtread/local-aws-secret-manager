@@ -4,20 +4,22 @@ use crate::{
         secrets::{cancel_delete_secret, get_secret_latest_version},
     },
     handlers::{
-        Handler,
+        Handler, SecretId,
         error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
     },
 };
 use axum::response::IntoResponse;
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 
 /// https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_RestoreSecret.html
 pub struct RestoreSecretHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct RestoreSecretRequest {
     #[serde(rename = "SecretId")]
-    secret_id: String,
+    #[garde(dive)]
+    secret_id: SecretId,
 }
 
 #[derive(Serialize)]
@@ -36,7 +38,7 @@ impl Handler for RestoreSecretHandler {
         db: &DbPool,
         request: Self::Request,
     ) -> Result<Self::Response, axum::response::Response> {
-        let secret_id = request.secret_id;
+        let SecretId(secret_id) = request.secret_id;
 
         let secret = match get_secret_latest_version(db, &secret_id).await {
             Ok(value) => value,

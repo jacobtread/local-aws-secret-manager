@@ -7,7 +7,7 @@ use crate::{
         },
     },
     handlers::{
-        Handler, Tag,
+        ClientRequestToken, Handler, SecretBinary, SecretName, SecretString, Tag,
         error::{
             AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceExistsException,
@@ -15,6 +15,7 @@ use crate::{
     },
 };
 use axum::response::{IntoResponse, Response};
+use garde::Validate;
 use rand::{Rng, distr::Alphanumeric};
 use serde::{Deserialize, Serialize};
 use std::ops::DerefMut;
@@ -23,19 +24,30 @@ use uuid::Uuid;
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_CreateSecret.html
 pub struct CreateSecretHandler;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct CreateSecretRequest {
     #[serde(rename = "Name")]
-    name: String,
+    #[garde(dive)]
+    name: SecretName,
+
     #[serde(rename = "Description")]
+    #[garde(inner(length(max = 2048)))]
     description: Option<String>,
+
     #[serde(rename = "ClientRequestToken")]
-    client_request_token: Option<String>,
+    #[garde(dive)]
+    client_request_token: Option<ClientRequestToken>,
+
     #[serde(rename = "SecretString")]
-    secret_string: Option<String>,
+    #[garde(dive)]
+    secret_string: Option<SecretString>,
+
     #[serde(rename = "SecretBinary")]
-    secret_binary: Option<String>,
+    #[garde(dive)]
+    secret_binary: Option<SecretBinary>,
+
     #[serde(rename = "Tags")]
+    #[garde(dive)]
     tags: Option<Vec<Tag>>,
 }
 
@@ -69,23 +81,28 @@ impl Handler for CreateSecretHandler {
     type Response = CreateSecretResponse;
 
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let name = request.name;
+        let SecretName(name) = request.name;
+
         let arn = create_secret_arn(&name);
 
         let version_id = request
             .client_request_token
+            .map(|value| value.0)
             // Generate a new version ID if none was provided
             .unwrap_or_else(|| Uuid::new_v4().to_string());
 
         let tags = request.tags.unwrap_or_default();
 
+        let secret_string = request.secret_string.map(SecretString::into_inner);
+        let secret_binary = request.secret_binary.map(SecretBinary::into_inner);
+
         // Must only specify one of the two
-        if request.secret_string.is_some() && request.secret_binary.is_some() {
+        if secret_string.is_some() && secret_binary.is_some() {
             return Err(AwsErrorResponse(InvalidRequestException).into_response());
         }
 
         // Must specify at least one
-        if request.secret_string.is_none() && request.secret_binary.is_none() {
+        if secret_string.is_none() && secret_binary.is_none() {
             return Err(AwsErrorResponse(InvalidRequestException).into_response());
         }
 
@@ -135,8 +152,8 @@ impl Handler for CreateSecretHandler {
 
                 // If the stored version data doesn't match this is an error that
                 // the resource already exists
-                if secret.secret_string.ne(&request.secret_string)
-                    || secret.secret_binary.ne(&request.secret_binary)
+                if secret.secret_string.ne(&secret_string)
+                    || secret.secret_binary.ne(&secret_binary)
                 {
                     return Err(AwsErrorResponse(ResourceExistsException).into_response());
                 }
@@ -159,8 +176,8 @@ impl Handler for CreateSecretHandler {
             CreateSecretVersion {
                 secret_arn: arn.clone(),
                 version_id: version_id.clone(),
-                secret_string: request.secret_string.clone(),
-                secret_binary: request.secret_binary.clone(),
+                secret_string: secret_string.clone(),
+                secret_binary: secret_binary.clone(),
             },
         )
         .await
@@ -192,8 +209,8 @@ impl Handler for CreateSecretHandler {
 
                 // If the stored version data doesn't match this is an error that
                 // the resource already exists
-                if secret.secret_string.ne(&request.secret_string)
-                    || secret.secret_binary.ne(&request.secret_binary)
+                if secret.secret_string.ne(&secret_string)
+                    || secret.secret_binary.ne(&secret_binary)
                 {
                     return Err(AwsErrorResponse(ResourceExistsException).into_response());
                 }
