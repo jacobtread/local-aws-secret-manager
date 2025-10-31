@@ -2,6 +2,8 @@
     <img src="assets/loker.png" height="128px">
 </h1>
 
+![Tests Status](https://img.shields.io/github/actions/workflow/status/jacobtread/loker/tests.yml?style=for-the-badge&label=Tests)
+
 **Loker** is a self-hosted AWS secrets manager compatible server. With the main purpose of being used for Integration and End-to-end testing use cases without requiring alternative secret backends.
 
 Data is stored in an encrypted SQLite database using [SQLCipher](https://github.com/sqlcipher/sqlcipher). Server supports using HTTPS and enforces AWS SigV4 signing on requests.

@@ -1,0 +1,23 @@
+name: Tests
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+    workflow_dispatch:
+
+jobs:
+    build:
+        name: Run Tests
+        runs-on: ubuntu-latest
+        steps:
+            # Checkout the repo for building
+            - uses: actions/checkout@v4
+
+            # Setup rust for building
+            - name: Set up Rust
+              uses: dtolnay/rust-toolchain@stable
+
+            # Test the binary
+            - name: Run tests
+              run: cargo test --verbose
