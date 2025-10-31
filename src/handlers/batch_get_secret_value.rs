@@ -70,6 +70,17 @@ struct SecretValueEntry {
     version_stages: Vec<String>,
 }
 
+fn default_max_results() -> i32 {
+    20
+}
+
+fn default_next_token() -> PaginationToken {
+    PaginationToken {
+        page_size: 20,
+        page_index: 0,
+    }
+}
+
 impl Handler for BatchGetSecretValueHandler {
     type Request = BatchGetSecretValueRequest;
     type Response = BatchGetSecretValueResponse;
@@ -83,71 +94,35 @@ impl Handler for BatchGetSecretValueHandler {
         match (request.filters, request.secret_id_list) {
             // Find secret values based on filters
             (Some(filters), None) => {
-                let max_results = request.max_results.unwrap_or(20);
+                let max_results = request.max_results.unwrap_or_else(default_max_results);
 
-                let mut pagination_token = request
+                let pagination_token = request
                     .next_token
-                    // Default pagination for the first page
-                    .unwrap_or(PaginationToken {
-                        page_size: max_results as i64,
-                        page_index: 0,
-                    });
+                    .unwrap_or_else(default_next_token)
+                    .page_size(max_results);
 
-                // Update the pagination page size to match the max results
-                pagination_token.page_size = max_results as i64;
-
-                let limit = pagination_token.page_size;
-                let offset = match pagination_token
-                    .page_size
-                    .checked_mul(pagination_token.page_index)
-                {
-                    Some(value) => value,
-                    None => {
-                        // Requested page exceeds the i64 bounds
-                        return Err(AwsErrorResponse(InvalidRequestException).into_response());
-                    }
-                };
+                let (limit, offset) = pagination_token
+                    .as_query_parts()
+                    .ok_or_else(|| AwsErrorResponse(InvalidRequestException).into_response())?;
 
                 let (secrets, count) = join!(
                     get_secrets_by_filter(db, &filters, false, limit, offset, false),
                     get_secrets_count_by_filter(db, &filters, false),
                 );
 
-                let secrets = match secrets {
-                    Ok(value) => value,
-                    Err(error) => {
-                        tracing::error!(?error, "failed to get secrets");
-                        return Err(AwsErrorResponse(InternalServiceError).into_response());
-                    }
-                };
+                let secrets = secrets.map_err(|error| {
+                    tracing::error!(?error, "failed to get secrets");
+                    AwsErrorResponse(InternalServiceError).into_response()
+                })?;
 
-                let count = match count {
-                    Ok(value) => value,
-                    Err(error) => {
-                        tracing::error!(?error, "failed to get secrets count");
-                        return Err(AwsErrorResponse(InternalServiceError).into_response());
-                    }
-                };
+                let count = count.map_err(|error| {
+                    tracing::error!(?error, "failed to get secrets count");
+                    AwsErrorResponse(InternalServiceError).into_response()
+                })?;
 
-                let has_next_page = offset.checked_add(limit).is_some_and(|size| count > size);
-
-                next_token = match (pagination_token.page_index.checked_add(1), has_next_page) {
-                    // Only provide a next token if the page is computable and we have enough entries to
-                    // fullfil the request
-                    (Some(next_page), true) => {
-                        //
-                        Some(
-                            PaginationToken {
-                                page_size: pagination_token.page_size,
-                                page_index: next_page,
-                            }
-                            .to_string(),
-                        )
-                    }
-
-                    // No next page
-                    _ => None,
-                };
+                next_token = pagination_token
+                    .get_next_page(count)
+                    .map(|value| value.to_string());
 
                 for secret in secrets {
                     secret_values.push(SecretValueEntry {

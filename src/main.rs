@@ -1,20 +1,20 @@
-use axum::{Extension, Router, http::StatusCode, routing::post_service};
-use axum_server::tls_rustls::RustlsConfig;
-use std::{error::Error, net::SocketAddr};
-use tower_http::trace::TraceLayer;
-
 use crate::{
     background::perform_background_tasks,
     config::Config,
     middleware::aws_sig_v4::{AwsCredential, AwsSigV4AuthLayer},
 };
+use axum::{Extension, Router, http::StatusCode, routing::post_service};
+use axum_server::tls_rustls::RustlsConfig;
+use std::{error::Error, net::SocketAddr};
+use tower_http::trace::TraceLayer;
+
+pub mod database;
+pub mod middleware;
 
 mod background;
 mod config;
-pub mod database;
-pub mod handlers;
+mod handlers;
 mod logging;
-pub mod middleware;
 mod utils;
 
 fn main() -> Result<(), Box<dyn Error>> {

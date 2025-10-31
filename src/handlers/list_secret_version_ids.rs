@@ -1,8 +1,3 @@
-use axum::response::{IntoResponse, Response};
-use garde::Validate;
-use serde::{Deserialize, Serialize};
-use tokio::join;
-
 use crate::{
     database::{
         DbPool,
@@ -21,6 +16,10 @@ use crate::{
     },
     utils::date::datetime_to_f64,
 };
+use axum::response::{IntoResponse, Response};
+use garde::Validate;
+use serde::{Deserialize, Serialize};
+use tokio::join;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_ListSecretVersionIds.html
 pub struct ListSecretVersionIdsHandler;
@@ -90,39 +89,29 @@ impl Handler for ListSecretVersionIdsHandler {
 
     #[tracing::instrument(skip_all, fields(secret_id = %request.secret_id))]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let SecretId(secret_id) = request.secret_id;
-        let include_deprecated = request.include_deprecated;
-        let max_results = request.max_results;
+        let ListSecretVersionIdsRequest {
+            include_deprecated,
+            max_results,
+            next_token,
+            secret_id,
+        } = request;
 
-        let mut pagination_token = request.next_token;
+        let SecretId(secret_id) = secret_id;
+        let pagination_token = next_token.page_size(max_results);
 
-        // Update the pagination page size to match the max results
-        pagination_token.page_size = max_results as i64;
-
-        let secret = match get_secret_latest_version(db, &secret_id).await {
-            Ok(value) => value,
-            Err(error) => {
+        let secret = get_secret_latest_version(db, &secret_id)
+            .await
+            //
+            .map_err(|error| {
                 tracing::error!(?error, "failed to get secret");
-                return Err(AwsErrorResponse(InternalServiceError).into_response());
-            }
-        };
+                AwsErrorResponse(InternalServiceError).into_response()
+            })?
+            //
+            .ok_or_else(|| AwsErrorResponse(ResourceNotFoundException).into_response())?;
 
-        let secret = match secret {
-            Some(value) => value,
-            None => return Err(AwsErrorResponse(ResourceNotFoundException).into_response()),
-        };
-
-        let limit = pagination_token.page_size;
-        let offset = match pagination_token
-            .page_size
-            .checked_mul(pagination_token.page_index)
-        {
-            Some(value) => value,
-            None => {
-                // Requested page exceeds the i64 bounds
-                return Err(AwsErrorResponse(InvalidRequestException).into_response());
-            }
-        };
+        let (limit, offset) = pagination_token
+            .as_query_parts()
+            .ok_or_else(|| AwsErrorResponse(InvalidRequestException).into_response())?;
 
         let (versions, count) = if include_deprecated {
             join!(
@@ -136,40 +125,19 @@ impl Handler for ListSecretVersionIdsHandler {
             )
         };
 
-        let versions = match versions {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::error!(?error, "failed to get versions");
-                return Err(AwsErrorResponse(InternalServiceError).into_response());
-            }
-        };
+        let versions = versions.map_err(|error| {
+            tracing::error!(?error, "failed to get versions");
+            AwsErrorResponse(InternalServiceError).into_response()
+        })?;
 
-        let count = match count {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::error!(?error, "failed to get versions count");
-                return Err(AwsErrorResponse(InternalServiceError).into_response());
-            }
-        };
+        let count = count.map_err(|error| {
+            tracing::error!(?error, "failed to get versions count");
+            AwsErrorResponse(InternalServiceError).into_response()
+        })?;
 
-        let has_next_page = offset.checked_add(limit).is_some_and(|size| count > size);
-
-        let next_token = match (pagination_token.page_index.checked_add(1), has_next_page) {
-            // Only provide a next token if the page is computable and we have enough entries to
-            // fullfil the request
-            (Some(next_page), true) => {
-                //
-                Some(PaginationToken {
-                    page_size: pagination_token.page_size,
-                    page_index: next_page,
-                })
-            }
-
-            // No next page
-            _ => None,
-        };
-
-        let next_token = next_token.map(|value| value.to_string());
+        let next_token = pagination_token
+            .get_next_page(count)
+            .map(|value| value.to_string());
 
         let versions = versions
             .into_iter()

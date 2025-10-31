@@ -1,22 +1,12 @@
 use crate::{
     database::DbPool,
     handlers::{
-        batch_get_secret_value::BatchGetSecretValueHandler,
-        create_secret::CreateSecretHandler,
-        delete_secret::DeleteSecretHandler,
-        describe_secret::DescribeSecretHandler,
-        error::{
-            AwsErrorResponse, InternalServiceError, InvalidParameterException,
-            InvalidRequestException, NotImplemented,
-        },
-        get_random_password::GetRandomPasswordHandler,
-        get_secret_value::GetSecretValueHandler,
-        list_secret_version_ids::ListSecretVersionIdsHandler,
-        list_secrets::ListSecretsHandler,
-        put_secret_value::PutSecretValueHandler,
-        restore_secret::RestoreSecretHandler,
-        tag_resource::TagResourceHandler,
-        untag_resource::UntagResourceHandler,
+        batch_get_secret_value::BatchGetSecretValueHandler, create_secret::CreateSecretHandler,
+        delete_secret::DeleteSecretHandler, describe_secret::DescribeSecretHandler,
+        get_random_password::GetRandomPasswordHandler, get_secret_value::GetSecretValueHandler,
+        list_secret_version_ids::ListSecretVersionIdsHandler, list_secrets::ListSecretsHandler,
+        put_secret_value::PutSecretValueHandler, restore_secret::RestoreSecretHandler,
+        tag_resource::TagResourceHandler, untag_resource::UntagResourceHandler,
         update_secret::UpdateSecretHandler,
         update_secret_version_stage::UpdateSecretVersionStageHandler,
     },
@@ -26,6 +16,10 @@ use axum::{
     body::Body,
     http::Request,
     response::{IntoResponse, Response},
+};
+use error::{
+    AwsErrorResponse, InternalServiceError, InvalidParameterException, InvalidRequestException,
+    NotImplemented,
 };
 use futures::future::BoxFuture;
 use garde::Validate;
@@ -39,21 +33,22 @@ use thiserror::Error;
 use tower::Service;
 use uuid::Uuid;
 
-pub mod batch_get_secret_value;
-pub mod create_secret;
-pub mod delete_secret;
-pub mod describe_secret;
-pub mod error;
-pub mod get_random_password;
-pub mod get_secret_value;
-pub mod list_secret_version_ids;
-pub mod list_secrets;
-pub mod put_secret_value;
-pub mod restore_secret;
-pub mod tag_resource;
-pub mod untag_resource;
-pub mod update_secret;
-pub mod update_secret_version_stage;
+pub(crate) mod error;
+
+mod batch_get_secret_value;
+mod create_secret;
+mod delete_secret;
+mod describe_secret;
+mod get_random_password;
+mod get_secret_value;
+mod list_secret_version_ids;
+mod list_secrets;
+mod put_secret_value;
+mod restore_secret;
+mod tag_resource;
+mod untag_resource;
+mod update_secret;
+mod update_secret_version_stage;
 
 pub fn create_handlers() -> HandlerRouter {
     HandlerRouter::default()
@@ -243,6 +238,36 @@ pub struct PaginationToken {
     /// Page index
     #[garde(skip)]
     page_index: i64,
+}
+
+impl PaginationToken {
+    /// Update the page size
+    fn page_size(mut self, page_size: impl Into<i64>) -> Self {
+        self.page_size = page_size.into();
+        self
+    }
+
+    // Compute the limit and offset to use for database queries
+    fn as_query_parts(&self) -> Option<(i64, i64)> {
+        let limit = self.page_size;
+        let offset = self.page_size.checked_mul(self.page_index)?;
+        Some((limit, offset))
+    }
+
+    /// Get the next page if one fits within the bounds of count
+    fn get_next_page(&self, count: i64) -> Option<PaginationToken> {
+        let next_page = self.page_index.checked_add(1)?;
+        let next_page_offset = next_page.checked_mul(self.page_size)?;
+
+        if count <= next_page_offset {
+            return None;
+        }
+
+        Some(PaginationToken {
+            page_size: self.page_size,
+            page_index: next_page,
+        })
+    }
 }
 
 impl<'de> Deserialize<'de> for PaginationToken {

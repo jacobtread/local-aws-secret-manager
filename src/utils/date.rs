@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn test_precision_check() {
-        // A date far in the future with subsecond component
+        // A date far in the future with sub-second component
         let dt = Utc
             .with_ymd_and_hms(3000, 1, 1, 0, 0, 0)
             .unwrap()

@@ -129,67 +129,39 @@ impl Handler for ListSecretsHandler {
 
     #[tracing::instrument(skip_all)]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
-        let include_planned_deletion = request.include_planned_deletion;
-        let max_results = request.max_results;
-        let filters = request.filters;
-        let asc = request.sort_order == "asc";
+        let ListSecretsRequest {
+            filters,
+            include_planned_deletion,
+            max_results,
+            next_token,
+            sort_order,
+        } = request;
 
-        let mut pagination_token = request.next_token;
+        let asc = sort_order == "asc";
+        let pagination_token = next_token.page_size(max_results);
 
-        // Update the pagination page size to match the max results
-        pagination_token.page_size = max_results as i64;
-
-        let limit = pagination_token.page_size;
-        let offset = match pagination_token
-            .page_size
-            .checked_mul(pagination_token.page_index)
-        {
-            Some(value) => value,
-            None => {
-                // Requested page exceeds the i64 bounds
-                return Err(AwsErrorResponse(InvalidRequestException).into_response());
-            }
-        };
+        let (limit, offset) = pagination_token
+            .as_query_parts()
+            .ok_or_else(|| AwsErrorResponse(InvalidRequestException).into_response())?;
 
         let (secrets, count) = join!(
             get_secrets_by_filter(db, &filters, include_planned_deletion, limit, offset, asc),
             get_secrets_count_by_filter(db, &filters, include_planned_deletion),
         );
 
-        let secrets = match secrets {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::error!(?error, "failed to get secrets");
-                return Err(AwsErrorResponse(InternalServiceError).into_response());
-            }
-        };
+        let secrets = secrets.map_err(|error| {
+            tracing::error!(?error, "failed to get secrets");
+            AwsErrorResponse(InternalServiceError).into_response()
+        })?;
 
-        let count = match count {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::error!(?error, "failed to get secrets count");
-                return Err(AwsErrorResponse(InternalServiceError).into_response());
-            }
-        };
+        let count = count.map_err(|error| {
+            tracing::error!(?error, "failed to get secrets count");
+            AwsErrorResponse(InternalServiceError).into_response()
+        })?;
 
-        let has_next_page = offset.checked_add(limit).is_some_and(|size| count > size);
-
-        let next_token = match (pagination_token.page_index.checked_add(1), has_next_page) {
-            // Only provide a next token if the page is computable and we have enough entries to
-            // fullfil the request
-            (Some(next_page), true) => {
-                //
-                Some(PaginationToken {
-                    page_size: pagination_token.page_size,
-                    page_index: next_page,
-                })
-            }
-
-            // No next page
-            _ => None,
-        };
-
-        let next_token = next_token.map(|value| value.to_string());
+        let next_token = pagination_token
+            .get_next_page(count)
+            .map(|value| value.to_string());
 
         let secret_list = secrets
             .into_iter()
@@ -215,6 +187,15 @@ impl Handler for ListSecretsHandler {
                     .map(|version| (version.version_id, version.version_stages))
                     .collect();
 
+                let tags = secret
+                    .version_tags
+                    .into_iter()
+                    .map(|tag| Tag {
+                        key: tag.key,
+                        value: tag.value,
+                    })
+                    .collect();
+
                 SecretListEntry {
                     arn: secret.arn,
                     description: secret.description,
@@ -231,14 +212,7 @@ impl Handler for ListSecretsHandler {
                     rotation_enabled: false,
                     rotation_lambda_arn: None,
                     rotation_rules: None,
-                    tags: secret
-                        .version_tags
-                        .into_iter()
-                        .map(|tag| Tag {
-                            key: tag.key,
-                            value: tag.value,
-                        })
-                        .collect(),
+                    tags,
                     secret_versions_to_stages,
                 }
             })

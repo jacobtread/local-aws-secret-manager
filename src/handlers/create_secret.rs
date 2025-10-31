@@ -19,7 +19,6 @@ use garde::Validate;
 use rand::{Rng, distr::Alphanumeric};
 use serde::{Deserialize, Serialize};
 use std::ops::DerefMut;
-use uuid::Uuid;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_CreateSecret.html
 pub struct CreateSecretHandler;
@@ -83,17 +82,11 @@ impl Handler for CreateSecretHandler {
     #[tracing::instrument(skip_all, fields(name = %request.name))]
     async fn handle(db: &DbPool, request: Self::Request) -> Result<Self::Response, Response> {
         let SecretName(name) = request.name;
+        let ClientRequestToken(version_id) = request.client_request_token.unwrap_or_default();
 
         let arn = create_secret_arn(&name);
 
-        let version_id = request
-            .client_request_token
-            .map(|value| value.0)
-            // Generate a new version ID if none was provided
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-
         let tags = request.tags.unwrap_or_default();
-
         let secret_string = request.secret_string.map(SecretString::into_inner);
         let secret_binary = request.secret_binary.map(SecretBinary::into_inner);
 
@@ -107,13 +100,10 @@ impl Handler for CreateSecretHandler {
             return Err(AwsErrorResponse(InvalidRequestException).into_response());
         }
 
-        let mut t = match db.begin().await {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::error!(?error, "failed to begin transaction");
-                return Err(AwsErrorResponse(InternalServiceError).into_response());
-            }
-        };
+        let mut t = db.begin().await.map_err(|error| {
+            tracing::error!(?error, "failed to begin transaction");
+            AwsErrorResponse(InternalServiceError).into_response()
+        })?;
 
         // Create the secret
         if let Err(error) = create_secret(
@@ -237,6 +227,10 @@ impl Handler for CreateSecretHandler {
         if let Err(error) =
             add_secret_version_stage(t.deref_mut(), &arn, &version_id, "AWSCURRENT").await
         {
+            if let Err(error) = t.rollback().await {
+                tracing::error!(?error, "failed to rollback transaction");
+            }
+
             tracing::error!(?error, "failed to add AWSPREVIOUS tag to secret");
             return Err(AwsErrorResponse(InternalServiceError).into_response());
         }
@@ -244,7 +238,6 @@ impl Handler for CreateSecretHandler {
         // Attach all the secrets
         for tag in tags {
             if let Err(error) = put_secret_tag(t.deref_mut(), &arn, &tag.key, &tag.value).await {
-                // Rollback the transaction on failure
                 if let Err(error) = t.rollback().await {
                     tracing::error!(?error, "failed to rollback transaction");
                 }

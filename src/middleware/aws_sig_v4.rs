@@ -3,7 +3,7 @@ use crate::{
         AwsErrorResponse, IncompleteSignature, InvalidClientTokenId, InvalidRequestException,
         MissingAuthenticationToken, SignatureDoesNotMatch,
     },
-    utils::aws_sig_v4::{aws_sig_v4, create_canonical_request},
+    utils::aws_sig_v4::{aws_sig_v4, create_canonical_request, parse_auth_header},
 };
 use axum::{
     body::Body,
@@ -13,7 +13,6 @@ use axum::{
 use futures::future::BoxFuture;
 use http_body_util::BodyExt;
 use std::{mem::swap, sync::Arc};
-use thiserror::Error;
 use tower::{Layer, Service};
 
 pub struct AwsCredential {
@@ -196,87 +195,4 @@ where
             inner.call(request).await
         })
     }
-}
-
-/// Parsed AWS SigV4 header
-#[derive(Debug, Clone)]
-struct AwsSigV4Auth {
-    pub credential: String,
-    pub signed_headers: Vec<String>,
-    pub signature: String,
-}
-
-#[derive(Debug, Error)]
-enum AuthHeaderError {
-    #[error("invalid header parts")]
-    InvalidHeader,
-
-    #[error("unsupported algorithm, this implementation only supports AWS4-HMAC-SHA256")]
-    UnsupportedAlgorithm,
-
-    #[error("invalid key value pair")]
-    InvalidKeyValue,
-
-    #[error("missing Credential")]
-    MissingCredential,
-
-    #[error("missing SignedHeaders")]
-    MissingSignedHeaders,
-
-    #[error("missing Signature")]
-    MissingSignature,
-}
-
-fn parse_auth_header(header: &str) -> Result<AwsSigV4Auth, AuthHeaderError> {
-    let mut parts = header.splitn(2, ' ');
-
-    // AWS4-HMAC-SHA256
-    let algorithm = parts
-        .next()
-        .ok_or(AuthHeaderError::InvalidHeader)?
-        .to_string();
-
-    if algorithm != "AWS4-HMAC-SHA256" {
-        return Err(AuthHeaderError::UnsupportedAlgorithm);
-    }
-
-    let kv_string = parts.next().ok_or(AuthHeaderError::InvalidHeader)?;
-
-    let mut credential: Option<String> = None;
-    let mut signed_headers: Option<String> = None;
-    let mut signature: Option<String> = None;
-
-    for kv in kv_string.split(", ") {
-        let mut split = kv.splitn(2, '=');
-        let key = split.next().ok_or(AuthHeaderError::InvalidKeyValue)?;
-        let value = split.next().ok_or(AuthHeaderError::InvalidKeyValue)?;
-        match key {
-            "Credential" => {
-                credential = Some(value.to_string());
-            }
-            "SignedHeaders" => {
-                signed_headers = Some(value.to_string());
-            }
-            "Signature" => {
-                signature = Some(value.to_string());
-            }
-
-            _ => {}
-        }
-    }
-
-    let credential = credential.ok_or(AuthHeaderError::MissingCredential)?;
-    let signed_headers = signed_headers.ok_or(AuthHeaderError::MissingSignedHeaders)?;
-    let signature = signature.ok_or(AuthHeaderError::MissingSignature)?;
-
-    let signed_headers: Vec<String> = signed_headers
-        .split(';')
-        .map(|value| value.to_string())
-        .collect();
-
-    Ok(AwsSigV4Auth {
-        credential,
-        signed_headers,
-        signature,
-    })
 }

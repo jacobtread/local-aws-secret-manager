@@ -21,6 +21,7 @@
     "Jacobtread",
     "subsec",
     "NOCASE",
-    "unvalidated"
+    "unvalidated",
+    "Timelike"
   ]
 }
