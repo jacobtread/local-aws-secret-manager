@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS "secret_version_stages" (
     -- Each version can have multiple stages but each stage value should be unique per version
     PRIMARY KEY ("secret_arn", "version_id", "value"),
 
+    -- Stage value must be unique for each secret
+    UNIQUE ("secret_arn", "value"),
+
     -- Foreign key referencing secrets_versions composite key
     FOREIGN KEY ("secret_arn", "version_id")
         REFERENCES "secrets_versions"("secret_arn", "version_id")

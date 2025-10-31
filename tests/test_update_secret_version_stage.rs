@@ -1,4 +1,8 @@
-use aws_sdk_secretsmanager::types::Tag;
+use aws_sdk_secretsmanager::{
+    error::SdkError,
+    operation::update_secret_version_stage::UpdateSecretVersionStageError,
+    types::{Tag, error::InvalidRequestException},
+};
 
 use crate::common::test_server;
 
@@ -529,4 +533,52 @@ async fn test_update_secret_version_stage_add_custom_multiple_non_current_empty_
 /// to a version with specifying to remove it from that version should return
 /// an error
 #[tokio::test]
-async fn test_update_secret_version_stage_move_without_remove_error() {}
+async fn test_update_secret_version_stage_move_without_remove_error() {
+    let (client, _server) = test_server().await;
+
+    let _create_response = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    let _version_2 = client
+        .put_secret_value()
+        .secret_id("test")
+        .secret_string("test-2")
+        .send()
+        .await
+        .unwrap();
+
+    let version_3 = client
+        .put_secret_value()
+        .secret_id("test")
+        .secret_string("test-3")
+        .send()
+        .await
+        .unwrap();
+
+    let update_error = client
+        .update_secret_version_stage()
+        .secret_id("test")
+        .version_stage("AWSPREVIOUS")
+        .move_to_version_id(version_3.version_id().unwrap())
+        .send()
+        .await
+        .unwrap_err();
+
+    let update_error = match update_error {
+        SdkError::ServiceError(error) => error,
+        error => panic!("expected SdkError::ServiceError got {error:?}"),
+    };
+
+    let _exception: InvalidRequestException = match update_error.into_err() {
+        UpdateSecretVersionStageError::InvalidRequestException(error) => error,
+        error => {
+            panic!("expected UpdateSecretVersionStageError::InvalidRequestException got {error:?}")
+        }
+    };
+}
