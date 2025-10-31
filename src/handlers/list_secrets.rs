@@ -7,10 +7,7 @@ use tokio::join;
 use crate::{
     database::{
         DbPool,
-        secrets::{
-            get_secrets_by_filter, get_secrets_by_filter_with_deprecated,
-            get_secrets_count_by_filter, get_secrets_count_by_filter_with_deprecated,
-        },
+        secrets::{get_secrets_by_filter, get_secrets_count_by_filter},
     },
     handlers::{
         Filter, Handler, PaginationToken, Tag,
@@ -123,17 +120,10 @@ impl Handler for ListSecretsHandler {
             }
         };
 
-        let (secrets, count) = if include_planned_deletion {
-            join!(
-                get_secrets_by_filter_with_deprecated(db, &filters, limit, offset, asc),
-                get_secrets_count_by_filter_with_deprecated(db, &filters),
-            )
-        } else {
-            join!(
-                get_secrets_by_filter(db, &filters, limit, offset, asc),
-                get_secrets_count_by_filter(db, &filters),
-            )
-        };
+        let (secrets, count) = join!(
+            get_secrets_by_filter(db, &filters, include_planned_deletion, limit, offset, asc),
+            get_secrets_count_by_filter(db, &filters, include_planned_deletion),
+        );
 
         let secrets = match secrets {
             Ok(value) => value,

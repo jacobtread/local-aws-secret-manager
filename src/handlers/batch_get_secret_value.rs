@@ -110,8 +110,8 @@ impl Handler for BatchGetSecretValueHandler {
                 };
 
                 let (secrets, count) = join!(
-                    get_secrets_by_filter(db, &filters, limit, offset, false),
-                    get_secrets_count_by_filter(db, &filters),
+                    get_secrets_by_filter(db, &filters, false, limit, offset, false),
+                    get_secrets_count_by_filter(db, &filters, false),
                 );
 
                 let secrets = match secrets {

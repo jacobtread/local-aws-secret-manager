@@ -1,11 +1,11 @@
-use chrono::{DateTime, Days, Utc};
-use serde::Deserialize;
-use sqlx::prelude::FromRow;
-
 use crate::{
     database::{DbErr, DbExecutor, DbResult},
     handlers::Filter,
+    utils::filter::split_search_terms,
 };
+use chrono::{DateTime, Days, Utc};
+use serde::Deserialize;
+use sqlx::prelude::FromRow;
 
 #[derive(Clone, FromRow)]
 pub struct StoredSecret {
@@ -380,6 +380,7 @@ pub async fn get_secret_by_version_id(
     .await
 }
 
+/// Add a secret version stage to a specific secret version
 pub async fn add_secret_version_stage(
     db: impl DbExecutor<'_>,
     secret_arn: &str,
@@ -402,6 +403,7 @@ pub async fn add_secret_version_stage(
     Ok(())
 }
 
+/// Remove a secret version stage from a specific secret version
 pub async fn remove_secret_version_stage(
     db: impl DbExecutor<'_>,
     secret_arn: &str,
@@ -496,37 +498,10 @@ pub async fn get_secret_by_version_stage(
     .await
 }
 
-fn split_search_terms(value: &str) -> Vec<String> {
-    let mut words = Vec::new();
-    let mut current = String::new();
-    let mut prev_char: Option<char> = None;
-
-    for c in value.chars() {
-        if let Some(pc) = prev_char {
-            let split = (pc.is_lowercase() != c.is_lowercase())
-                || (pc.is_uppercase() != c.is_uppercase())
-                || (pc.is_alphabetic() != c.is_alphabetic())
-                || (pc.is_numeric() != c.is_numeric())
-                || (pc.is_alphanumeric() != c.is_alphanumeric())
-                || (pc.is_whitespace() != c.is_whitespace());
-
-            if split && !current.is_empty() {
-                words.push(current.clone());
-                current.clear();
-            }
-        }
-
-        current.push(c);
-        prev_char = Some(c);
-    }
-
-    if !current.is_empty() {
-        words.push(current);
-    }
-
-    words
-}
-
+/// Generates the WHERE portion of a filtered query appending it to `query` returning
+/// a list of parameters that need to be bound to the query
+///
+/// Assumes `query` has already specified the WHERE and at least one clause like 1=1
 fn push_secret_filter_where(filters: &[Filter], query: &mut String) -> Vec<String> {
     let mut bound_values: Vec<String> = Vec::new();
 
@@ -690,105 +665,66 @@ fn push_secret_filter_where(filters: &[Filter], query: &mut String) -> Vec<Strin
     bound_values
 }
 
-const GET_SECRETS_BY_FILTER_SELECT: &str = r#"
-"secret".*,
-"secret_version"."version_id",
-"secret_version"."secret_string",
-"secret_version"."secret_binary",
-"secret_version"."created_at" AS "version_created_at",
-"secret_version"."last_accessed_at" AS "version_last_accessed_at",
-COALESCE((
-    SELECT json_group_array("version_stage"."value")
-    FROM "secret_version_stages" "version_stage"
-    WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
-        AND "version_stage"."version_id" = "secret_version"."version_id"
-), '[]') AS "version_stages",
-COALESCE((
-    SELECT json_group_array(
-        json_object(
-            'key', "secret_tag"."key",
-            'value', "secret_tag"."value",
-            'created_at', "secret_tag"."created_at",
-            'updated_at', "secret_tag"."updated_at"
-        )
-    )
-    FROM "secrets_tags" "secret_tag"
-    WHERE "secret_tag"."secret_arn" = "secret"."arn"
-), '[]') AS "version_tags",
-COALESCE((
-    SELECT json_group_array(
-        json_object(
-            'version_id', "secret_version"."version_id",
-            'version_stages', COALESCE((
+/// Get secrets filtered using the provided `filters`, will only include secrets planned for deletion
+/// if `include_planned_deletions` is true.
+///
+/// Paginated using the provided `limit` and `offset` use `asc` to order the results by creation date
+/// in ascending order, false to order descending
+pub async fn get_secrets_by_filter(
+    db: impl DbExecutor<'_>,
+    filters: &[Filter],
+    include_planned_deletions: bool,
+    limit: i64,
+    offset: i64,
+    asc: bool,
+) -> DbResult<Vec<StoredSecretWithVersionStages>> {
+    let mut query = r#"
+        SELECT
+            "secret".*,
+            "secret_version"."version_id",
+            "secret_version"."secret_string",
+            "secret_version"."secret_binary",
+            "secret_version"."created_at" AS "version_created_at",
+            "secret_version"."last_accessed_at" AS "version_last_accessed_at",
+            COALESCE((
                 SELECT json_group_array("version_stage"."value")
                 FROM "secret_version_stages" "version_stage"
                 WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
                     AND "version_stage"."version_id" = "secret_version"."version_id"
-            ), '[]'),
-            'created_at', "secret_version"."created_at",
-            'last_accessed_at', "secret_version"."last_accessed_at"
-        )
-    )
-    FROM "secrets_versions" "secret_version"
-    JOIN "secret_version_stages" "version_stage"
-        ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
-        AND "version_stage"."version_id" = "secret_version"."version_id"
-        AND "version_stage"."value" = 'AWSCURRENT'
-    WHERE "secret_version"."secret_arn" = "secret"."arn"
-), '[]') AS "versions"
-"#;
-
-pub async fn get_secrets_by_filter(
-    db: impl DbExecutor<'_>,
-    filters: &[Filter],
-    limit: i64,
-    offset: i64,
-    asc: bool,
-) -> DbResult<Vec<StoredSecretWithVersionStages>> {
-    let mut query = format!(
-        r#"
-        SELECT {GET_SECRETS_BY_FILTER_SELECT}
-        FROM "secrets" "secret"
-        JOIN "secrets_versions" "secret_version" ON "secret_version"."secret_arn" = "secret"."arn"
-        JOIN "secret_version_stages" "version_stage"
-            ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
-            AND "version_stage"."version_id" = "secret_version"."version_id"
-            AND "version_stage"."value" = 'AWSCURRENT'
-        WHERE "secret"."scheduled_delete_at" IS NULL
-    "#
-    );
-
-    let bound_values = push_secret_filter_where(filters, &mut query);
-
-    // Apply ordering
-    if asc {
-        query.push_str(r#" ORDER BY "secret_version"."created_at" ASC "#);
-    } else {
-        query.push_str(r#" ORDER BY "secret_version"."created_at" DESC "#);
-    }
-
-    // Apply pagination
-    query.push_str(r#"LIMIT ? OFFSET ?"#);
-
-    let mut query = sqlx::query_as(&query);
-
-    for bound in bound_values {
-        query = query.bind(bound);
-    }
-
-    query.bind(limit).bind(offset).fetch_all(db).await
-}
-
-pub async fn get_secrets_by_filter_with_deprecated(
-    db: impl DbExecutor<'_>,
-    filters: &[Filter],
-    limit: i64,
-    offset: i64,
-    asc: bool,
-) -> DbResult<Vec<StoredSecretWithVersionStages>> {
-    let mut query = format!(
-        r#"
-        SELECT {GET_SECRETS_BY_FILTER_SELECT}
+            ), '[]') AS "version_stages",
+            COALESCE((
+                SELECT json_group_array(
+                    json_object(
+                        'key', "secret_tag"."key",
+                        'value', "secret_tag"."value",
+                        'created_at', "secret_tag"."created_at",
+                        'updated_at', "secret_tag"."updated_at"
+                    )
+                )
+                FROM "secrets_tags" "secret_tag"
+                WHERE "secret_tag"."secret_arn" = "secret"."arn"
+            ), '[]') AS "version_tags",
+            COALESCE((
+                SELECT json_group_array(
+                    json_object(
+                        'version_id', "secret_version"."version_id",
+                        'version_stages', COALESCE((
+                            SELECT json_group_array("version_stage"."value")
+                            FROM "secret_version_stages" "version_stage"
+                            WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                                AND "version_stage"."version_id" = "secret_version"."version_id"
+                        ), '[]'),
+                        'created_at', "secret_version"."created_at",
+                        'last_accessed_at', "secret_version"."last_accessed_at"
+                    )
+                )
+                FROM "secrets_versions" "secret_version"
+                JOIN "secret_version_stages" "version_stage"
+                    ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+                    AND "version_stage"."value" = 'AWSCURRENT'
+                WHERE "secret_version"."secret_arn" = "secret"."arn"
+            ), '[]') AS "versions"
         FROM "secrets" "secret"
         JOIN "secrets_versions" "secret_version" ON "secret_version"."secret_arn" = "secret"."arn"
         JOIN "secret_version_stages" "version_stage"
@@ -797,7 +733,11 @@ pub async fn get_secrets_by_filter_with_deprecated(
             AND "version_stage"."value" = 'AWSCURRENT'
         WHERE 1=1
     "#
-    );
+    .to_string();
+
+    if !include_planned_deletions {
+        query.push_str(r#" AND "secret"."scheduled_delete_at" IS NULL "#);
+    }
 
     let bound_values = push_secret_filter_where(filters, &mut query);
 
@@ -820,36 +760,12 @@ pub async fn get_secrets_by_filter_with_deprecated(
     query.bind(limit).bind(offset).fetch_all(db).await
 }
 
+/// Get the total number of secrets filtered using the provided `filters`, will only include secrets planned for deletion
+/// if `include_planned_deletions` is true.
 pub async fn get_secrets_count_by_filter(
     db: impl DbExecutor<'_>,
     filters: &[Filter],
-) -> DbResult<i64> {
-    let mut query = r#"
-        SELECT COUNT(*)
-        FROM "secrets" "secret"
-        JOIN "secrets_versions" "secret_version" ON "secret_version"."secret_arn" = "secret"."arn"
-        JOIN "secret_version_stages" "version_stage"
-            ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
-            AND "version_stage"."version_id" = "secret_version"."version_id"
-            AND "version_stage"."value" = 'AWSCURRENT'
-        WHERE "secret"."scheduled_delete_at" IS NULL
-    "#
-    .to_string();
-
-    let bound_values = push_secret_filter_where(filters, &mut query);
-    let mut query = sqlx::query_as(&query);
-
-    for bound in bound_values {
-        query = query.bind(bound);
-    }
-
-    let (count,): (i64,) = query.fetch_one(db).await?;
-    Ok(count)
-}
-
-pub async fn get_secrets_count_by_filter_with_deprecated(
-    db: impl DbExecutor<'_>,
-    filters: &[Filter],
+    include_planned_deletions: bool,
 ) -> DbResult<i64> {
     let mut query = r#"
         SELECT COUNT(*)
@@ -862,6 +778,10 @@ pub async fn get_secrets_count_by_filter_with_deprecated(
         WHERE 1=1
     "#
     .to_string();
+
+    if !include_planned_deletions {
+        query.push_str(r#" AND "secret"."scheduled_delete_at" IS NULL "#);
+    }
 
     let bound_values = push_secret_filter_where(filters, &mut query);
     let mut query = sqlx::query_as(&query);
