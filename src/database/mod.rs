@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{ops::DerefMut, path::Path};
 
 use sqlx::{Sqlite, SqlitePool, Transaction, sqlite::SqlitePoolOptions};
 
@@ -51,11 +51,16 @@ pub async fn create_database(key: String, raw_path: String) -> Result<DbPool, Cr
     }
 
     let pool = SqlitePoolOptions::new()
-        .after_connect(move |connection, _metadata| {
+        .after_connect(move |mut connection, _metadata| {
             let key = key.clone();
-            // Ensure connection is provided the database key
             Box::pin(async move {
+                // Set database encryption key
                 sqlx::query(&format!("PRAGMA key = '{key}';"))
+                    .execute(connection.deref_mut())
+                    .await?;
+
+                // Enable case sensitive LIKE
+                sqlx::query("PRAGMA case_sensitive_like = ON;")
                     .execute(connection)
                     .await?;
 

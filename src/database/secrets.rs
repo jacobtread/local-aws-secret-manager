@@ -519,9 +519,14 @@ impl From<Vec<crate::handlers::Filter>> for SecretFilter {
                 "tag-value" => {
                     filters.tag_value.extend(filter.values);
                 }
-                _ => {
-                    filters.all.extend(filter.values);
+                "all" => {
+                    for value in filter.values {
+                        filters
+                            .all
+                            .extend(value.split_whitespace().map(|value| value.to_string()));
+                    }
                 }
+                _ => {}
             }
         }
         filters
@@ -531,101 +536,152 @@ impl From<Vec<crate::handlers::Filter>> for SecretFilter {
 fn push_secret_filter_where(filter: &SecretFilter, query: &mut String) -> Vec<String> {
     let mut bound_values: Vec<String> = Vec::new();
 
+    fn write_condition_cs<'a, 'b>(
+        query: &mut String,
+        bound_values: &mut Vec<String>,
+        column: &str,
+        values: impl IntoIterator<Item = &'a String>,
+    ) {
+        for (index, value) in values.into_iter().enumerate() {
+            if index > 0 {
+                query.push_str(" OR ");
+            }
+
+            query.push_str(column);
+
+            // The ! prefix will invert the like
+            match value.strip_prefix("!") {
+                Some(value) => {
+                    query.push_str(" NOT LIKE ?");
+                    bound_values.push(format!("{value}%"));
+                }
+                _ => {
+                    query.push_str(" LIKE ?");
+                    bound_values.push(format!("{value}%"));
+                }
+            }
+        }
+    }
+
+    fn write_condition_ci<'a, 'b>(
+        query: &mut String,
+        bound_values: &mut Vec<String>,
+        column: &str,
+        all: impl IntoIterator<Item = &'b String>,
+    ) {
+        for (index, value) in all.into_iter().enumerate() {
+            if index > 0 {
+                query.push_str(" OR ");
+            }
+
+            query.push_str(column);
+
+            // The ! prefix will invert the like
+            match value.strip_prefix("!") {
+                Some(value) => {
+                    query.push_str(" NOT LIKE ? COLLATE NOCASE");
+                    bound_values.push(format!("{value}%"));
+                }
+                _ => {
+                    query.push_str(" LIKE ? COLLATE NOCASE");
+                    bound_values.push(format!("{value}%"));
+                }
+            }
+        }
+    }
+
+    // Apply "all" filters as part of an initial OR based collect everything query
+    if !filter.all.is_empty() {
+        // All name filter
+        query.push_str("AND ((");
+        write_condition_ci(query, &mut bound_values, r#""secret"."name""#, &filter.all);
+
+        query.push_str(") OR (");
+
+        // All Description filter
+        write_condition_ci(
+            query,
+            &mut bound_values,
+            r#""secret"."description""#,
+            &filter.all,
+        );
+
+        // All Tag filters
+        query.push_str(
+            r#") OR EXISTS (
+                SELECT 1 FROM "secrets_tags" AS "secret_tag"
+                WHERE "secret_tag"."secret_arn" = "secret"."arn"
+                AND ((
+            "#,
+        );
+
+        write_condition_ci(
+            query,
+            &mut bound_values,
+            r#""secret_tag"."key""#,
+            &filter.all,
+        );
+
+        query.push_str(") OR (");
+
+        write_condition_ci(
+            query,
+            &mut bound_values,
+            r#""secret_tag"."value""#,
+            &filter.all,
+        );
+
+        query.push_str("))))");
+    }
+
     // Name filter
-    if !filter.name.is_empty() || !filter.all.is_empty() {
+    if !filter.name.is_empty() {
         query.push_str(" AND (");
-
-        for (i, name) in filter.name.iter().enumerate() {
-            if i > 0 {
-                query.push_str(" OR ");
-            }
-            query.push_str("secret.name LIKE ?");
-            bound_values.push(format!("{}%", name));
-        }
-
-        for (i, name) in filter.all.iter().enumerate() {
-            if i > 0 {
-                query.push_str(" OR ");
-            }
-            query.push_str("secret.name ILIKE ?");
-            bound_values.push(format!("{}%", name));
-        }
-
+        write_condition_cs(query, &mut bound_values, r#""secret"."name""#, &filter.name);
         query.push(')');
     }
 
     // Description filter
-    if !filter.description.is_empty() || !filter.all.is_empty() {
+    if !filter.description.is_empty() {
         query.push_str(" AND (");
-
-        for (i, desc) in filter.description.iter().enumerate() {
-            if i > 0 {
-                query.push_str(" OR ");
-            }
-            query.push_str("secret.description LIKE ?");
-            bound_values.push(format!("{}%", desc));
-        }
-
-        for (i, desc) in filter.all.iter().enumerate() {
-            if i > 0 {
-                query.push_str(" OR ");
-            }
-            query.push_str("secret.description ILIKE ?");
-            bound_values.push(format!("{}%", desc));
-        }
-
+        write_condition_ci(
+            query,
+            &mut bound_values,
+            r#""secret"."description""#,
+            &filter.description,
+        );
         query.push(')');
     }
 
     // Tag filters
-    if !filter.tag_key.is_empty() || !filter.tag_value.is_empty() || !filter.all.is_empty() {
+    if !filter.tag_key.is_empty() || !filter.tag_value.is_empty() {
         query.push_str(
-            " AND EXISTS (
-                SELECT 1 FROM secrets_tags AS secret_tag
-                WHERE secret_tag.secret_arn = secret_version.secret_arn
-                  AND secret_tag.version_id = secret_version.version_id",
+            r#" AND EXISTS (
+                SELECT 1 FROM "secrets_tags" AS "secret_tag"
+                WHERE "secret_tag"."secret_arn" = "secret"."arn"
+            "#,
         );
 
-        if !filter.tag_key.is_empty() || !filter.all.is_empty() {
+        if !filter.tag_key.is_empty() {
             query.push_str(" AND (");
-
-            for (i, key) in filter.tag_key.iter().enumerate() {
-                if i > 0 {
-                    query.push_str(" OR ");
-                }
-                query.push_str("secret_tag.key LIKE ?");
-                bound_values.push(format!("{}%", key));
-            }
-
-            for (i, key) in filter.all.iter().enumerate() {
-                if i > 0 {
-                    query.push_str(" OR ");
-                }
-                query.push_str("secret_tag.key ILIKE ?");
-                bound_values.push(format!("{}%", key));
-            }
+            write_condition_cs(
+                query,
+                &mut bound_values,
+                r#""secret_tag"."key""#,
+                &filter.tag_key,
+            );
 
             query.push(')');
         }
 
-        if !filter.tag_value.is_empty() || !filter.all.is_empty() {
+        if !filter.tag_value.is_empty() {
             query.push_str(" AND (");
-
-            for (i, val) in filter.tag_value.iter().enumerate() {
-                if i > 0 {
-                    query.push_str(" OR ");
-                }
-                query.push_str("secret_tag.value LIKE ?");
-                bound_values.push(format!("{}%", val));
-            }
-
-            for (i, val) in filter.all.iter().enumerate() {
-                if i > 0 {
-                    query.push_str(" OR ");
-                }
-                query.push_str("secret_tag.value ILIKE ?");
-                bound_values.push(format!("{}%", val));
-            }
+            write_condition_cs(
+                query,
+                &mut bound_values,
+                r#""secret_tag"."value""#,
+                &filter.tag_value,
+            );
 
             query.push(')');
         }
@@ -749,9 +805,9 @@ pub async fn get_secrets_by_filter_with_deprecated(
 
     // Apply ordering
     if asc {
-        query.push_str(r#"ORDER BY "secret_version"."created_at" ASC "#);
+        query.push_str(r#" ORDER BY "secret_version"."created_at" ASC "#);
     } else {
-        query.push_str(r#"ORDER BY "secret_version"."created_at" DESC "#);
+        query.push_str(r#" ORDER BY "secret_version"."created_at" DESC "#);
     }
 
     // Apply pagination

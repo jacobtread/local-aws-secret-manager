@@ -48,6 +48,16 @@ impl Drop for TestServer {
 #[allow(dead_code)]
 async fn memory_database() -> DbPool {
     let pool = SqlitePoolOptions::new()
+        .after_connect(move |connection, _metadata| {
+            Box::pin(async move {
+                // Enable case sensitive LIKE
+                sqlx::query("PRAGMA case_sensitive_like = ON;")
+                    .execute(connection)
+                    .await?;
+
+                Ok(())
+            })
+        })
         .connect("sqlite::memory:")
         .await
         .unwrap();
