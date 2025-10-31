@@ -1,6 +1,6 @@
 use crate::{
     database::{DbErr, DbExecutor, DbResult},
-    handlers::Filter,
+    handlers::models::Filter,
     utils::filter::split_search_terms,
 };
 use chrono::{DateTime, Days, Utc};

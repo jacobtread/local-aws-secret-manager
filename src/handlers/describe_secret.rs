@@ -4,8 +4,9 @@ use crate::{
         secrets::{get_secret_latest_version, get_secret_versions},
     },
     handlers::{
-        Handler, SecretId, Tag,
+        Handler,
         error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
+        models::{SecretId, Tag},
     },
     utils::date::datetime_to_f64,
 };

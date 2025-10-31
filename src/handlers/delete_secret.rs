@@ -4,8 +4,9 @@ use crate::{
         secrets::{delete_secret, get_secret_latest_version, schedule_delete_secret},
     },
     handlers::{
-        Handler, SecretId,
+        Handler,
         error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
+        models::SecretId,
     },
     utils::date::datetime_to_f64,
 };

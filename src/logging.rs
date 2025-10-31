@@ -1,5 +1,6 @@
 use tracing_subscriber::{EnvFilter, fmt::Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Initialize logging
 pub fn init_logging() {
     tracing_subscriber::registry()
         .with(filter())
@@ -7,7 +8,7 @@ pub fn init_logging() {
         .init();
 }
 
-pub fn fmt_layer<S>() -> Layer<S> {
+fn fmt_layer<S>() -> Layer<S> {
     tracing_subscriber::fmt::layer()
         // Display source code file paths
         .with_file(true)
@@ -17,7 +18,7 @@ pub fn fmt_layer<S>() -> Layer<S> {
         .with_target(false)
 }
 
-pub fn filter() -> EnvFilter {
+fn filter() -> EnvFilter {
     // Use the logging options from env variables
     EnvFilter::from_default_env()
         // Increase logging requirements for noisy dependencies

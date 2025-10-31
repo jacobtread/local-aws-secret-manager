@@ -7,11 +7,12 @@ use crate::{
         },
     },
     handlers::{
-        ClientRequestToken, Handler, SecretBinary, SecretName, SecretString, Tag,
+        Handler,
         error::{
             AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceExistsException,
         },
+        models::{ClientRequestToken, SecretBinary, SecretName, SecretString, Tag},
     },
 };
 use axum::response::{IntoResponse, Response};

@@ -1,9 +1,3 @@
-use axum::response::{IntoResponse, Response};
-use garde::Validate;
-use rand::seq::{IndexedRandom, SliceRandom};
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
 use crate::{
     database::DbPool,
     handlers::{
@@ -11,6 +5,11 @@ use crate::{
         error::{AwsErrorResponse, InvalidRequestException},
     },
 };
+use axum::response::{IntoResponse, Response};
+use garde::Validate;
+use rand::seq::{IndexedRandom, SliceRandom};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetRandomPassword.html
 pub struct GetRandomPasswordHandler;

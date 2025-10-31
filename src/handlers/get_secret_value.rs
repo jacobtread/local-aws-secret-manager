@@ -8,11 +8,12 @@ use crate::{
         },
     },
     handlers::{
-        Handler, SecretId, VersionId,
+        Handler,
         error::{
             AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceNotFoundException,
         },
+        models::{SecretId, VersionId},
     },
     utils::date::datetime_to_f64,
 };

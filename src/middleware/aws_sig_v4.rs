@@ -15,6 +15,7 @@ use http_body_util::BodyExt;
 use std::{mem::swap, sync::Arc};
 use tower::{Layer, Service};
 
+/// Credential for the [AwsSigV4AuthLayer] to allow access to
 pub struct AwsCredential {
     access_key_id: String,
     access_key_secret: String,
@@ -36,6 +37,7 @@ pub struct AwsSigV4AuthLayer {
 }
 
 impl AwsSigV4AuthLayer {
+    /// Create a new AWS SigV4 layer using the provided credentials
     pub fn new(credentials: AwsCredential) -> Self {
         Self {
             credentials: Arc::new(credentials),

@@ -100,6 +100,7 @@ async fn server() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Health check route
 async fn health() -> StatusCode {
     StatusCode::OK
 }

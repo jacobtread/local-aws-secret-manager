@@ -4,8 +4,9 @@ use crate::{
         secrets::{cancel_delete_secret, get_secret_latest_version},
     },
     handlers::{
-        Handler, SecretId,
+        Handler,
         error::{AwsErrorResponse, InternalServiceError, ResourceNotFoundException},
+        models::SecretId,
     },
 };
 use axum::response::IntoResponse;

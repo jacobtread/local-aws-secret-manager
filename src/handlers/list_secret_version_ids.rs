@@ -4,11 +4,12 @@ use crate::{
         secrets::{count_secret_versions, get_secret_latest_version, get_secret_versions_page},
     },
     handlers::{
-        Handler, PaginationToken, SecretId,
+        Handler,
         error::{
             AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceNotFoundException,
         },
+        models::{PaginationToken, SecretId},
     },
     utils::date::datetime_to_f64,
 };

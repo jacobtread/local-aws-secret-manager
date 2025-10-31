@@ -12,19 +12,22 @@ const DEFAULT_SERVER_ADDRESS_HTTPS: SocketAddr =
 pub struct Config {
     /// Encryption key to encrypt and decrypt the database
     pub encryption_key: String,
-
     /// Path to the server database file
     pub database_path: String,
-
-    /// Whether to use HTTPS instead of HTTP
-    pub use_https: bool,
 
     /// Server address to bind against
     pub server_address: SocketAddr,
 
+    /// Whether to use HTTPS instead of HTTP
+    pub use_https: bool,
+    /// Path to the HTTPS certificate file
     pub certificate_path: String,
+    /// Path to the HTTPS private key file
     pub private_key_path: String,
+
+    /// Access key ID for AWS SigV4
     pub access_key_id: String,
+    /// Access key secret for AWS SigV4
     pub access_key_secret: String,
 }
 
@@ -44,6 +47,7 @@ pub enum ConfigError {
 }
 
 impl Config {
+    /// Load the config from the environment variables
     pub fn from_env() -> Result<Config, ConfigError> {
         let encryption_key =
             std::env::var("SM_ENCRYPTION_KEY").map_err(|_| ConfigError::MissingEncryptionKey)?;

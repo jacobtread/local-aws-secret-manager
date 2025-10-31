@@ -7,11 +7,12 @@ use crate::{
         },
     },
     handlers::{
-        APIErrorType, Filter, Handler, PaginationToken,
+        Handler,
         error::{
             AwsError, AwsErrorResponse, InternalServiceError, InvalidRequestException,
             ResourceNotFoundException,
         },
+        models::{APIErrorType, Filter, PaginationToken},
     },
     utils::date::datetime_to_f64,
 };

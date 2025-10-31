@@ -35,6 +35,7 @@ pub enum AuthHeaderError {
     MissingSignature,
 }
 
+/// Parse the Authorization header value to extract the AWS SigV4 data
 pub fn parse_auth_header(header: &str) -> Result<AwsSigV4Auth, AuthHeaderError> {
     let mut parts = header.splitn(2, ' ');
 
