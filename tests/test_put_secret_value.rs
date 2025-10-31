@@ -2,9 +2,13 @@ use aws_sdk_secretsmanager::{
     error::SdkError,
     operation::put_secret_value::PutSecretValueError,
     primitives::Blob,
-    types::{Tag, error::InvalidRequestException},
+    types::{
+        Tag,
+        error::{InvalidRequestException, ResourceExistsException},
+    },
 };
 use loker::database::secrets::get_secret_versions;
+use uuid::Uuid;
 
 use crate::common::test_server;
 
@@ -277,9 +281,89 @@ async fn test_put_secret_value_version_stage() {
 /// successful version will silently succeed with the existing secret details
 /// rather than error as long as the value matches
 #[tokio::test]
-async fn test_put_secret_value_retry_token() {}
+async fn test_put_secret_value_retry_token() {
+    let (client, _server) = test_server().await;
+
+    let client_request_token = Uuid::new_v4().to_string();
+
+    let _create_response = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    let put_response_1 = client
+        .put_secret_value()
+        .secret_id("test")
+        .secret_string("test-updated")
+        .client_request_token(&client_request_token)
+        .send()
+        .await
+        .unwrap();
+
+    let put_response_2 = client
+        .put_secret_value()
+        .secret_id("test")
+        .secret_string("test-updated")
+        .client_request_token(&client_request_token)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(put_response_1.arn(), put_response_2.arn());
+    assert_eq!(put_response_1.name(), put_response_2.name());
+    assert_eq!(put_response_1.version_id(), put_response_2.version_id());
+    assert_eq!(
+        put_response_1.version_stages(),
+        put_response_2.version_stages()
+    );
+}
 
 /// Tests that trying to make a second request using the same ClientRequestToken after the
 /// first succeeded but using a different value should error
 #[tokio::test]
-async fn test_put_secret_value_retry_token_different_error() {}
+async fn test_put_secret_value_retry_token_different_error() {
+    let (client, _server) = test_server().await;
+
+    let client_request_token = Uuid::new_v4().to_string();
+
+    let _create_response = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    let _put_response_1 = client
+        .put_secret_value()
+        .secret_id("test")
+        .secret_string("test-updated")
+        .client_request_token(&client_request_token)
+        .send()
+        .await
+        .unwrap();
+
+    let put_response_err = client
+        .put_secret_value()
+        .secret_id("test")
+        .secret_string("test-updated-different")
+        .client_request_token(&client_request_token)
+        .send()
+        .await
+        .unwrap_err();
+
+    let list_error = match put_response_err {
+        SdkError::ServiceError(error) => error,
+        error => panic!("expected SdkError::ServiceError got {error:?}"),
+    };
+
+    let _exception: ResourceExistsException = match list_error.into_err() {
+        PutSecretValueError::ResourceExistsException(error) => error,
+        error => panic!("expected PutSecretValueError::ResourceExistsException got {error:?}"),
+    };
+}
