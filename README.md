@@ -23,8 +23,6 @@ Data is stored in an encrypted SQLite database using [SQLCipher](https://github.
 - [x] [UpdateSecret](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecret.html)
 - [x] [UpdateSecretVersionStage](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecretVersionStage.html)
 
-\* Implementation awaiting testing
-
 ## Not Planned:
 
 - [ ] [CancelRotateSecret](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_CancelRotateSecret.html)
