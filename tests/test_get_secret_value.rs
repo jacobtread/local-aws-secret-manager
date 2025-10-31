@@ -550,7 +550,7 @@ async fn test_get_secret_value_last_accessed_updated() {
         .await
         .unwrap();
 
-    let describe_response_2 = client
+    let describe_response_3 = client
         .describe_secret()
         .secret_id("test")
         .send()
@@ -558,7 +558,7 @@ async fn test_get_secret_value_last_accessed_updated() {
         .unwrap();
 
     assert!(
-        describe_response_2.last_accessed_date().unwrap()
-            > describe_response_1.last_accessed_date().unwrap()
+        describe_response_3.last_accessed_date().unwrap()
+            > describe_response_2.last_accessed_date().unwrap()
     );
 }
