@@ -516,16 +516,19 @@ fn push_secret_filter_where(filters: &[Filter], query: &mut String) -> Vec<Strin
                 query.push_str(" OR ");
             }
 
+            // Escape underscores
+            let value = value.replace('_', r"\_");
+
             query.push_str(column);
 
             // The ! prefix will invert the like
             match value.strip_prefix("!") {
                 Some(value) => {
-                    query.push_str(" NOT LIKE ?");
+                    query.push_str(r" NOT LIKE ? ESCAPE '\'");
                     bound_values.push(format!("{value}%"));
                 }
                 _ => {
-                    query.push_str(" LIKE ?");
+                    query.push_str(r" LIKE ? ESCAPE '\'");
                     bound_values.push(format!("{value}%"));
                 }
             }
@@ -543,16 +546,19 @@ fn push_secret_filter_where(filters: &[Filter], query: &mut String) -> Vec<Strin
                 query.push_str(" OR ");
             }
 
+            // Escape underscores
+            let value = value.replace('_', r"\_");
+
             query.push_str(column);
 
             // The ! prefix will invert the like
             match value.strip_prefix("!") {
                 Some(value) => {
-                    query.push_str(" NOT LIKE ? COLLATE NOCASE");
+                    query.push_str(r" NOT LIKE ? ESCAPE '\' COLLATE NOCASE");
                     bound_values.push(format!("{value}%"));
                 }
                 _ => {
-                    query.push_str(" LIKE ? COLLATE NOCASE");
+                    query.push_str(r" LIKE ? ESCAPE '\' COLLATE NOCASE");
                     bound_values.push(format!("{value}%"));
                 }
             }
