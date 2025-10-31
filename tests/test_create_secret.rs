@@ -4,7 +4,7 @@ use aws_sdk_secretsmanager::{
     primitives::Blob,
     types::{
         Tag,
-        error::{InvalidRequestException, ResourceExistsException},
+        error::{InvalidParameterException, InvalidRequestException, ResourceExistsException},
     },
 };
 use uuid::Uuid;
@@ -337,6 +337,58 @@ async fn test_create_secret_value_both_secret_type_error() {
         CreateSecretError::InvalidRequestException(error) => error,
         error => panic!("expected CreateSecretError::InvalidRequestException got {error:?}"),
     };
+}
+
+/// Tests name length validation errors
+#[tokio::test]
+async fn test_create_secret_value_name_length_validation_errors() {
+    let (client, _server) = test_server().await;
+
+    let create_error = client
+        .create_secret()
+        .name("t".repeat(2049))
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap_err();
+
+    let create_error = match create_error {
+        SdkError::ServiceError(error) => error,
+        error => panic!("expected SdkError::ServiceError got {error:?}"),
+    };
+
+    let _exception: InvalidParameterException = match create_error.into_err() {
+        CreateSecretError::InvalidParameterException(error) => error,
+        error => panic!("expected CreateSecretError::InvalidParameterException got {error:?}"),
+    };
+}
+
+/// Tests name characters validation errors
+#[tokio::test]
+async fn test_create_secret_value_name_characters_validation_errors() {
+    let (client, _server) = test_server().await;
+
+    for invalid_chars in ['\0', '>', '<', '~', '&', '%', '`'] {
+        let create_error = client
+            .create_secret()
+            .name(invalid_chars.to_string())
+            .secret_string("test")
+            .tags(Tag::builder().key("test-tag").value("test-value").build())
+            .send()
+            .await
+            .unwrap_err();
+
+        let create_error = match create_error {
+            SdkError::ServiceError(error) => error,
+            error => panic!("expected SdkError::ServiceError got {error:?}"),
+        };
+
+        let _exception: InvalidParameterException = match create_error.into_err() {
+            CreateSecretError::InvalidParameterException(error) => error,
+            error => panic!("expected CreateSecretError::InvalidParameterException got {error:?}"),
+        };
+    }
 }
 
 /// Test that specifying tags when creating a secret are created
