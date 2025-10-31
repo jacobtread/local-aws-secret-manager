@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use crate::{
     background::perform_background_tasks,
     config::Config,
