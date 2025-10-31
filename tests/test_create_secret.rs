@@ -341,4 +341,40 @@ async fn test_create_secret_value_both_secret_type_error() {
 
 /// Test that specifying tags when creating a secret are created
 #[tokio::test]
-async fn test_create_secret_tags() {}
+async fn test_create_secret_tags() {
+    let (client, _server) = test_server().await;
+
+    let _create_response = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .tags(
+            Tag::builder()
+                .key("test-tag-2")
+                .value("test-value-2")
+                .build(),
+        )
+        .send()
+        .await
+        .unwrap();
+
+    let describe_response = client
+        .describe_secret()
+        .secret_id("test")
+        .send()
+        .await
+        .unwrap();
+
+    // Should have a matching tag
+    assert_eq!(
+        describe_response.tags(),
+        &[
+            Tag::builder().key("test-tag").value("test-value").build(),
+            Tag::builder()
+                .key("test-tag-2")
+                .value("test-value-2")
+                .build()
+        ]
+    );
+}
