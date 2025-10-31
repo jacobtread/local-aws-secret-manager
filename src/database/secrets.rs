@@ -323,63 +323,6 @@ pub async fn update_secret_version_last_accessed(
     Ok(())
 }
 
-/// Get the current version of a secret where the name OR arn matches the `secret_id`
-pub async fn get_secret_latest_version(
-    db: impl DbExecutor<'_>,
-    secret_id: &str,
-) -> DbResult<Option<StoredSecret>> {
-    get_secret_by_version_stage(db, secret_id, "AWSCURRENT").await
-}
-
-/// Get a secret where the name OR arn matches the `secret_id` and there is a version
-/// with the version ID of `version_id`
-pub async fn get_secret_by_version_id(
-    db: impl DbExecutor<'_>,
-    secret_id: &str,
-    version_id: &str,
-) -> DbResult<Option<StoredSecret>> {
-    sqlx::query_as(
-        r#"
-        SELECT
-            "secret".*,
-            "secret_version"."version_id",
-            "secret_version"."secret_string",
-            "secret_version"."secret_binary",
-            "secret_version"."created_at" AS "version_created_at",
-            "secret_version"."last_accessed_at" AS "version_last_accessed_at",
-            COALESCE((
-                SELECT json_group_array("version_stage"."value")
-                FROM "secret_version_stages" "version_stage"
-                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
-                    AND "version_stage"."version_id" = "secret_version"."version_id"
-            ), '[]') AS "version_stages",
-            COALESCE((
-                SELECT json_group_array(
-                    json_object(
-                        'key', "secret_tag"."key",
-                        'value', "secret_tag"."value",
-                        'created_at', "secret_tag"."created_at",
-                        'updated_at', "secret_tag"."updated_at"
-                    )
-                )
-                FROM "secrets_tags" "secret_tag"
-                WHERE "secret_tag"."secret_arn" = "secret"."arn"
-            ), '[]') AS "version_tags"
-        FROM "secrets" "secret"
-        JOIN "secrets_versions" "secret_version"
-            ON "secret_version"."secret_arn" = "secret"."arn"
-            AND "secret_version"."version_id" = ?
-        WHERE "secret"."name" = ? OR "secret"."arn" = ?
-        LIMIT 1;
-    "#,
-    )
-    .bind(version_id)
-    .bind(secret_id)
-    .bind(secret_id)
-    .fetch_optional(db)
-    .await
-}
-
 /// Add a secret version stage to a specific secret version
 pub async fn add_secret_version_stage(
     db: impl DbExecutor<'_>,
@@ -445,6 +388,90 @@ pub async fn remove_secret_version_stage_any(
     Ok(result.rows_affected())
 }
 
+/// Get the current version of a secret where the name OR arn matches the `secret_id`
+pub async fn get_secret_latest_version(
+    db: impl DbExecutor<'_>,
+    secret_id: &str,
+) -> DbResult<Option<StoredSecret>> {
+    get_secret_by_version_stage(db, secret_id, "AWSCURRENT").await
+}
+
+/// Check if the value is a partial arn
+fn is_partial_arn(value: &str) -> bool {
+    let is_arn_like = value.starts_with("arn:") && value.split(':').count() >= 6;
+    is_arn_like && (value.contains('*') || value.contains('?'))
+}
+
+/// Create a partial arn acceptable for a LIKE query
+fn make_partial_arn_like_query(value: &str) -> Option<String> {
+    if is_partial_arn(value) {
+        Some(
+            value
+                // Escape underscores
+                .replace('_', r"\_")
+                // Replace the placeholders with SQLite LIKE equivalents
+                .replace('*', "%")
+                .replace('?', "_"),
+        )
+    } else {
+        None
+    }
+}
+
+/// Get a secret where the name OR arn matches the `secret_id` and there is a version
+/// with the version ID of `version_id`
+pub async fn get_secret_by_version_id(
+    db: impl DbExecutor<'_>,
+    secret_id: &str,
+    version_id: &str,
+) -> DbResult<Option<StoredSecret>> {
+    let partial_arn = make_partial_arn_like_query(secret_id);
+
+    sqlx::query_as(
+        r#"
+        SELECT
+            "secret".*,
+            "secret_version"."version_id",
+            "secret_version"."secret_string",
+            "secret_version"."secret_binary",
+            "secret_version"."created_at" AS "version_created_at",
+            "secret_version"."last_accessed_at" AS "version_last_accessed_at",
+            COALESCE((
+                SELECT json_group_array("version_stage"."value")
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            ), '[]') AS "version_stages",
+            COALESCE((
+                SELECT json_group_array(
+                    json_object(
+                        'key', "secret_tag"."key",
+                        'value', "secret_tag"."value",
+                        'created_at', "secret_tag"."created_at",
+                        'updated_at', "secret_tag"."updated_at"
+                    )
+                )
+                FROM "secrets_tags" "secret_tag"
+                WHERE "secret_tag"."secret_arn" = "secret"."arn"
+            ), '[]') AS "version_tags"
+        FROM "secrets" "secret"
+        JOIN "secrets_versions" "secret_version"
+            ON "secret_version"."secret_arn" = "secret"."arn"
+            AND "secret_version"."version_id" = ?
+        WHERE "secret"."name" = ? OR "secret"."arn" = ?
+            OR (? = TRUE AND "secret"."arn" LIKE ?)
+        LIMIT 1;
+    "#,
+    )
+    .bind(version_id)
+    .bind(secret_id)
+    .bind(secret_id)
+    .bind(partial_arn.is_some())
+    .bind(partial_arn)
+    .fetch_optional(db)
+    .await
+}
+
 /// Get a secret where the name OR arn matches the `secret_id` and there is a version
 /// in `version_stage`
 pub async fn get_secret_by_version_stage(
@@ -452,6 +479,8 @@ pub async fn get_secret_by_version_stage(
     secret_id: &str,
     version_stage: &str,
 ) -> DbResult<Option<StoredSecret>> {
+    let partial_arn = make_partial_arn_like_query(secret_id);
+
     sqlx::query_as(
         r#"
         SELECT
@@ -487,6 +516,7 @@ pub async fn get_secret_by_version_stage(
             AND "version_stage"."version_id" = "secret_version"."version_id"
             AND "version_stage"."value" = ?
         WHERE "secret"."name" = ? OR "secret"."arn" = ?
+            OR (? = TRUE AND "secret"."arn" LIKE ?)
         ORDER BY "secret_version"."created_at" DESC
         LIMIT 1;
     "#,
@@ -494,6 +524,67 @@ pub async fn get_secret_by_version_stage(
     .bind(version_stage)
     .bind(secret_id)
     .bind(secret_id)
+    .bind(partial_arn.is_some())
+    .bind(partial_arn)
+    .fetch_optional(db)
+    .await
+}
+
+/// Get a secret where the name OR arn matches the `secret_id` and there is a version
+/// in `version_stage` with the version ID `version_id`
+pub async fn get_secret_by_version_stage_and_id(
+    db: impl DbExecutor<'_>,
+    secret_id: &str,
+    version_id: &str,
+    version_stage: &str,
+) -> DbResult<Option<StoredSecret>> {
+    let partial_arn = make_partial_arn_like_query(secret_id);
+
+    sqlx::query_as(
+        r#"
+        SELECT
+            "secret".*,
+            "secret_version"."version_id",
+            "secret_version"."secret_string",
+            "secret_version"."secret_binary",
+            "secret_version"."created_at" AS "version_created_at",
+            "secret_version"."last_accessed_at" AS "version_last_accessed_at",
+            COALESCE((
+                SELECT json_group_array("version_stage"."value")
+                FROM "secret_version_stages" "version_stage"
+                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
+                    AND "version_stage"."version_id" = "secret_version"."version_id"
+            ), '[]') AS "version_stages",
+            COALESCE((
+                SELECT json_group_array(
+                    json_object(
+                        'key', "secret_tag"."key",
+                        'value', "secret_tag"."value",
+                        'created_at', "secret_tag"."created_at",
+                        'updated_at', "secret_tag"."updated_at"
+                    )
+                )
+                FROM "secrets_tags" "secret_tag"
+                WHERE "secret_tag"."secret_arn" = "secret"."arn"
+            ), '[]') AS "version_tags"
+        FROM "secrets" "secret"
+        JOIN ("secrets_versions" "secret_version" ON "secret_version"."secret_arn" = "secret"."arn")
+            AND "secret_version"."version_id" = ?
+        JOIN "secret_version_stages" "version_stage"
+            ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
+            AND "version_stage"."version_id" = "secret_version"."version_id"
+            AND "version_stage"."value" = ?
+        WHERE "secret"."name" = ? OR "secret"."arn" = ?
+            OR (? = TRUE AND "secret"."arn" LIKE ?)
+        LIMIT 1;
+    "#,
+    )
+    .bind(version_id)
+    .bind(version_stage)
+    .bind(secret_id)
+    .bind(secret_id)
+    .bind(partial_arn.is_some())
+    .bind(partial_arn)
     .fetch_optional(db)
     .await
 }
@@ -798,60 +889,6 @@ pub async fn get_secrets_count_by_filter(
 
     let (count,): (i64,) = query.fetch_one(db).await?;
     Ok(count)
-}
-
-/// Get a secret where the name OR arn matches the `secret_id` and there is a version
-/// in `version_stage` with the version ID `version_id`
-pub async fn get_secret_by_version_stage_and_id(
-    db: impl DbExecutor<'_>,
-    secret_id: &str,
-    version_id: &str,
-    version_stage: &str,
-) -> DbResult<Option<StoredSecret>> {
-    sqlx::query_as(
-        r#"
-        SELECT
-            "secret".*,
-            "secret_version"."version_id",
-            "secret_version"."secret_string",
-            "secret_version"."secret_binary",
-            "secret_version"."created_at" AS "version_created_at",
-            "secret_version"."last_accessed_at" AS "version_last_accessed_at",
-            COALESCE((
-                SELECT json_group_array("version_stage"."value")
-                FROM "secret_version_stages" "version_stage"
-                WHERE "version_stage"."secret_arn" = "secret_version"."secret_arn"
-                    AND "version_stage"."version_id" = "secret_version"."version_id"
-            ), '[]') AS "version_stages",
-            COALESCE((
-                SELECT json_group_array(
-                    json_object(
-                        'key', "secret_tag"."key",
-                        'value', "secret_tag"."value",
-                        'created_at', "secret_tag"."created_at",
-                        'updated_at', "secret_tag"."updated_at"
-                    )
-                )
-                FROM "secrets_tags" "secret_tag"
-                WHERE "secret_tag"."secret_arn" = "secret"."arn"
-            ), '[]') AS "version_tags"
-        FROM "secrets" "secret"
-        JOIN ("secrets_versions" "secret_version" ON "secret_version"."secret_arn" = "secret"."arn")
-            AND "secret_version"."version_id" = ?
-        JOIN "secret_version_stages" "version_stage"
-            ON "version_stage"."secret_arn" = "secret_version"."secret_arn"
-            AND "version_stage"."version_id" = "secret_version"."version_id"
-            AND "version_stage"."value" = ?
-        WHERE "secret"."name" = ? OR "secret"."arn" = ?
-        LIMIT 1;
-    "#,
-    )
-    .bind(version_id)
-    .bind(version_stage)
-    .bind(secret_id)
-    .bind(secret_id)
-    .fetch_optional(db)
-    .await
 }
 
 /// Get all versions of a secret

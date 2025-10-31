@@ -151,6 +151,102 @@ async fn test_get_secret_value_by_arn_string_success() {
     );
 }
 
+/// Tests that a string secret can be retrieved by ARN successfully
+#[tokio::test]
+async fn test_get_secret_value_by_partial_arn_string_success() {
+    let (client, _server) = test_server().await;
+
+    let create_response = client
+        .create_secret()
+        .name("test")
+        .secret_string("test")
+        .tags(Tag::builder().key("test-tag").value("test-value").build())
+        .send()
+        .await
+        .unwrap();
+
+    // Server should reply with a version_id for the created version
+    assert!(create_response.version_id().is_some());
+
+    // Name should match
+    assert_eq!(create_response.name(), Some("test"));
+
+    let get_response = client
+        .get_secret_value()
+        .secret_id("arn:aws:secretsmanager:us-east-1:1:secret:*")
+        .send()
+        .await
+        .unwrap();
+
+    // Created ARN should match
+    assert_eq!(get_response.arn(), create_response.arn());
+
+    // Retrieved value should match created
+    assert_eq!(get_response.secret_string(), Some("test"));
+
+    // Retrieved version should match created
+    assert_eq!(get_response.version_id(), create_response.version_id());
+
+    // Created secret should be in the AWSCURRENT version stage
+    assert_eq!(
+        get_response
+            .version_stages()
+            .first()
+            .map(|value| value.as_ref()),
+        Some("AWSCURRENT")
+    );
+
+    let get_response = client
+        .get_secret_value()
+        .secret_id("arn:aws:secretsmanager:*:1:secret:*")
+        .send()
+        .await
+        .unwrap();
+
+    // Created ARN should match
+    assert_eq!(get_response.arn(), create_response.arn());
+
+    // Retrieved value should match created
+    assert_eq!(get_response.secret_string(), Some("test"));
+
+    // Retrieved version should match created
+    assert_eq!(get_response.version_id(), create_response.version_id());
+
+    // Created secret should be in the AWSCURRENT version stage
+    assert_eq!(
+        get_response
+            .version_stages()
+            .first()
+            .map(|value| value.as_ref()),
+        Some("AWSCURRENT")
+    );
+
+    let get_response = client
+        .get_secret_value()
+        .secret_id("arn:aws:secretsmanager:us-east-1:1:secret:test-??????")
+        .send()
+        .await
+        .unwrap();
+
+    // Created ARN should match
+    assert_eq!(get_response.arn(), create_response.arn());
+
+    // Retrieved value should match created
+    assert_eq!(get_response.secret_string(), Some("test"));
+
+    // Retrieved version should match created
+    assert_eq!(get_response.version_id(), create_response.version_id());
+
+    // Created secret should be in the AWSCURRENT version stage
+    assert_eq!(
+        get_response
+            .version_stages()
+            .first()
+            .map(|value| value.as_ref()),
+        Some("AWSCURRENT")
+    );
+}
+
 /// Tests that a string secret can be retrieved by ARN using a specific version successfully
 #[tokio::test]
 async fn test_get_secret_value_by_arn_with_version_string_success() {
