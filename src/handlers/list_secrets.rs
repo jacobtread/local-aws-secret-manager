@@ -8,11 +8,10 @@ use crate::{
         error::{AwsErrorResponse, InternalServiceError, InvalidRequestException},
         models::{Filter, PaginationToken, Tag},
     },
-    utils::date::datetime_to_f64,
+    utils::{date::datetime_to_f64, string::join_iter_string},
 };
 use axum::response::{IntoResponse, Response};
 use garde::Validate;
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::join;
@@ -114,7 +113,7 @@ const VALID_SORT_ORDER: [&str; 2] = ["asc", "desc"];
 /// Checks if the provided value is a valid sort order
 fn is_valid_sort_order(value: &str, _context: &()) -> garde::Result {
     if !VALID_SORT_ORDER.contains(&value) {
-        let expected = VALID_SORT_ORDER.iter().join(", ");
+        let expected = join_iter_string(VALID_SORT_ORDER.iter(), ", ");
         return Err(garde::Error::new(format!(
             "unknown sort order expected one of: {expected}"
         )));

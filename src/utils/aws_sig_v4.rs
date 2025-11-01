@@ -1,10 +1,11 @@
 use axum::http::request::Parts;
 use bytes::Bytes;
-use itertools::Itertools;
 use ring::hmac::{self, Tag};
 use sha2::{Digest, Sha256};
 use std::fmt::Write;
 use thiserror::Error;
+
+use crate::utils::string::join_iter_string;
 
 /// Parsed AWS SigV4 header
 #[derive(Clone)]
@@ -198,14 +199,14 @@ fn canonicalize_query(query: &str) -> String {
 
     pairs.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
 
-    pairs
-        .into_iter()
-        .map(|(k, v)| {
+    join_iter_string(
+        pairs.into_iter().map(|(k, v)| {
             let k = aws_uri_encode(k, true);
             let v = aws_uri_encode(v, true);
             format!("{k}={v}")
-        })
-        .join("&")
+        }),
+        "&",
+    )
 }
 
 /// URL encode using the custom AWS url encoding

@@ -1,9 +1,10 @@
 use garde::Validate;
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, str::FromStr};
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::utils::string::join_iter_string;
 
 #[derive(Debug, Deserialize, Validate)]
 #[garde(transparent)]
@@ -126,7 +127,7 @@ const VALID_FILTER_KEYS: [&str; 7] = [
 /// Checks if the provided value is a valid filter key
 fn is_valid_filter_key(value: &str, _context: &()) -> garde::Result {
     if !VALID_FILTER_KEYS.contains(&value) {
-        let expected = VALID_FILTER_KEYS.iter().join(", ");
+        let expected = join_iter_string(VALID_FILTER_KEYS.iter(), ", ");
         return Err(garde::Error::new(format!(
             "unknown filter key expected one of: {expected}"
         )));

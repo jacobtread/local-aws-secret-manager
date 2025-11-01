@@ -50,9 +50,6 @@ libsqlite3-sys = { version ="=0.30.1", features = ["bundled-sqlcipher-vendored-o
 # Precise date and time implementation
 chrono = { version = "=0.4.42", features = ["serde"] }
 
-# Iterator utilities
-itertools = "=0.14.0"
-
 # SHA256, HMAC, and hex encoding for AWS SigV4
 sha2 = "=0.10.9"
 ring = "=0.17.14"
