@@ -8,6 +8,88 @@
 
 Data is stored in an encrypted SQLite database using [SQLCipher](https://github.com/sqlcipher/sqlcipher). Server supports using HTTPS and enforces AWS SigV4 signing on requests.
 
+## Quick Start (Docker)
+
+### HTTP
+
+The command below will start a simple docker container for **Loker** mounting the database to the
+`./data` folder.
+
+```sh
+docker run -d \
+  --name loker \
+  -p 8080:8080 \
+  -e SM_ENCRYPTION_KEY="your-encryption-key" \
+  -e SM_ACCESS_KEY_ID="your-access-key-id" \
+  -e SM_ACCESS_KEY_SECRET="your-access-key-secret" \
+  -v ./data:/data \
+  jacobtread/loker:latest
+```
+
+### HTTPS
+
+The command below will start a simple docker container for **Loker** with HTTPS enabled. For HTTPS
+you must provide your own certificate and private key.
+
+The following command will mount the certificates from `./certs` ensure that folder contains the
+certificate (`sm.cert.pem`) and private key (`sm.key.pem`) in PEM format.
+
+```sh
+docker run -d \
+  --name loker \
+  -p 8443:8443 \
+  -e SM_ENCRYPTION_KEY="your-encryption-key" \
+  -e SM_ACCESS_KEY_ID="your-access-key-id" \
+  -e SM_ACCESS_KEY_SECRET="your-access-key-secret" \
+  -e SM_USE_HTTPS="true" \
+  -e SM_HTTPS_CERTIFICATE_PATH="/certs/sm.cert.pem" \
+  -e SM_HTTPS_PRIVATE_KEY_PATH="/certs/sm.key.pem" \
+  -v ./certs:/certs \
+  -v ./data:/data \
+  jacobtread/loker:latest
+```
+
+## Quick Start (Docker Compose)
+
+```yaml
+services:
+    loker:
+        image: jacobtread/loker:latest
+        container_name: loker
+        restart: unless-stopped
+        environment:
+            SM_ENCRYPTION_KEY: "your-encryption-key"
+            SM_ACCESS_KEY_ID: "your-access-key-id"
+            SM_ACCESS_KEY_SECRET: "your-access-key-secret"
+            # Uncomment the lines below if you want to enable HTTPS
+            # SM_USE_HTTPS: "true"
+            # SM_HTTPS_CERTIFICATE_PATH: "/certs/sm.cert.pem"
+            # SM_HTTPS_PRIVATE_KEY_PATH: "/certs/sm.key.pem"
+        ports:
+            # For HTTP mode
+            - "8080:8080"
+            # For HTTPS mode (uncomment when using HTTPS)
+            # - "8443:8443"
+        volumes:
+            # Persistent data storage
+            - ./data:/data
+            # Mount certs only if using HTTPS
+            # - ./certs:/certs
+```
+
+## Environment Variables
+
+| Name                      | Required                                           | Description                                            |
+| ------------------------- | -------------------------------------------------- | ------------------------------------------------------ |
+| SM_ENCRYPTION_KEY         | Yes                                                | Encryption key to encrypt the database with            |
+| SM_DATABASE_PATH          | No (Default: secrets.db)                           | Path to the file where the database should be stored   |
+| SM_ACCESS_KEY_ID          | Yes                                                | Access key ID to use the server for AWS SigV4          |
+| SM_ACCESS_KEY_SECRET      | Yes                                                | Access key secret to use the server for AWS SigV4      |
+| SM_SERVER_ADDRESS         | No (Default: HTTP=0.0.0.0:8080 HTTPS=0.0.0.0:8443) | Socket address to bind the server to                   |
+| SM_USE_HTTPS              | No (Default: false)                                | Whether to use HTTPS instead of HTTP                   |
+| SM_HTTPS_CERTIFICATE_PATH | No (Default: sm.cert.pem)                          | Path to the certificate in PEM format to use for HTTPS |
+| SM_HTTPS_PRIVATE_KEY_PATH | No (Default: sm.key.pem)                           | Path to the private key in PEM format to use for HTTPS |
+
 ## Implementations:
 
 - [x] [BatchGetSecretValue](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_BatchGetSecretValue.html)
@@ -36,19 +118,6 @@ Data is stored in an encrypted SQLite database using [SQLCipher](https://github.
 - [ ] [RotateSecret](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_RotateSecret.html)
 - [ ] [StopReplicationToReplica](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_StopReplicationToReplica.html)
 - [ ] [ValidateResourcePolicy](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_ValidateResourcePolicy.html)
-
-## Environment Variables
-
-| Name                      | Required                                           | Description                                            |
-| ------------------------- | -------------------------------------------------- | ------------------------------------------------------ |
-| SM_ENCRYPTION_KEY         | Yes                                                | Encryption key to encrypt the database with            |
-| SM_DATABASE_PATH          | No (Default: secrets.db)                           | Path to the file where the database should be stored   |
-| SM_ACCESS_KEY_ID          | Yes                                                | Access key ID to use the server for AWS SigV4          |
-| SM_ACCESS_KEY_SECRET      | Yes                                                | Access key secret to use the server for AWS SigV4      |
-| SM_SERVER_ADDRESS         | No (Default: HTTP=0.0.0.0:8080 HTTPS=0.0.0.0:8443) | Socket address to bind the server to                   |
-| SM_USE_HTTPS              | No (Default: false)                                | Whether to use HTTPS instead of HTTP                   |
-| SM_HTTPS_CERTIFICATE_PATH | No (Default: sm.cert.pem)                          | Path to the certificate in PEM format to use for HTTPS |
-| SM_HTTPS_PRIVATE_KEY_PATH | No (Default: sm.key.pem)                           | Path to the private key in PEM format to use for HTTPS |
 
 ## Windows Build Notes
 
