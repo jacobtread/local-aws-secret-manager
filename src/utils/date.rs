@@ -1,7 +1,4 @@
-use chrono::{
-    DateTime, NaiveDateTime, Utc,
-    format::{DelayedFormat, StrftimeItems},
-};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use thiserror::Error;
 
 /// Turn the provided DateTime into a f64 representing the seconds with fractional
