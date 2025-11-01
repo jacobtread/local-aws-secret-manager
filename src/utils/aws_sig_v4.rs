@@ -1,11 +1,15 @@
 use axum::http::request::Parts;
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use ring::hmac::{self, Tag};
 use sha2::{Digest, Sha256};
 use std::fmt::Write;
 use thiserror::Error;
 
-use crate::utils::string::join_iter_string;
+use crate::utils::{
+    date::{format_amz_date, format_date_yyyymmdd},
+    string::join_iter_string,
+};
 
 /// Parsed AWS SigV4 header
 #[derive(Clone)]
@@ -149,13 +153,15 @@ pub fn create_canonical_request(signed_headers: &[String], parts: &Parts, body: 
 
 /// Create a AWS Sigv4 signature
 pub fn aws_sig_v4(
-    date_yyyymmdd: &str,
-    amz_date: &str,
+    date: DateTime<Utc>,
     region: &str,
     service: &str,
     canonical_request: &str,
     access_key_secret: &str,
 ) -> String {
+    let amz_date = format_amz_date(&date);
+    let date_yyyymmdd = format_date_yyyymmdd(&date);
+
     let k_secret = format!("AWS4{access_key_secret}");
     let k_date = hmac_sha256(k_secret.as_bytes(), date_yyyymmdd.as_bytes());
     let k_region = hmac_sha256(k_date.as_ref(), region.as_bytes());

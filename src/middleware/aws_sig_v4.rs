@@ -3,13 +3,17 @@ use crate::{
         AwsErrorResponse, IncompleteSignature, InvalidClientTokenId, InvalidRequestException,
         MissingAuthenticationToken, SignatureDoesNotMatch,
     },
-    utils::aws_sig_v4::{aws_sig_v4, create_canonical_request, parse_auth_header},
+    utils::{
+        aws_sig_v4::{aws_sig_v4, create_canonical_request, parse_auth_header},
+        date::{parse_amz_date, parse_http_date},
+    },
 };
 use axum::{
     body::Body,
     http::{Request, header::AUTHORIZATION},
     response::{IntoResponse, Response},
 };
+use chrono::Utc;
 use futures::future::BoxFuture;
 use http_body_util::BodyExt;
 use std::{mem::swap, sync::Arc};
@@ -103,19 +107,69 @@ where
                 }
             };
 
+            // Extract the AWS specific date header
             let amz_date = match parts.headers.get("x-amz-date") {
-                Some(value) => match value.to_str() {
-                    Ok(value) => value,
-                    // Invalid date header
-                    Err(_) => {
-                        return Ok(AwsErrorResponse(InvalidRequestException).into_response());
-                    }
-                },
+                Some(value) => {
+                    let value = match value.to_str() {
+                        Ok(value) => value,
+                        Err(_) => {
+                            // Date header is invalid
+                            return Ok(AwsErrorResponse(InvalidRequestException).into_response());
+                        }
+                    };
+
+                    let value = match parse_amz_date(value) {
+                        Ok(value) => value,
+                        Err(_) => {
+                            // Date header is invalid
+                            return Ok(AwsErrorResponse(InvalidRequestException).into_response());
+                        }
+                    };
+
+                    Some(value)
+                }
+                None => None,
+            };
+
+            // Extract the generic Date header
+            let http_date = match parts.headers.get("date") {
+                Some(value) => {
+                    let value = match value.to_str() {
+                        Ok(value) => value,
+                        Err(_) => {
+                            // Date header is invalid
+                            return Ok(AwsErrorResponse(InvalidRequestException).into_response());
+                        }
+                    };
+
+                    let value = match parse_http_date(value) {
+                        Ok(value) => value,
+                        Err(_) => {
+                            // Date header is invalid
+                            return Ok(AwsErrorResponse(InvalidRequestException).into_response());
+                        }
+                    };
+
+                    Some(value)
+                }
+                None => None,
+            };
+
+            let date = match amz_date.or(http_date) {
+                Some(value) => value,
                 None => {
-                    // Missing date header
+                    // No date present on the request
                     return Ok(AwsErrorResponse(InvalidRequestException).into_response());
                 }
             };
+
+            let now = Utc::now();
+            let time_diff_now = now.timestamp().saturating_sub(date.timestamp()).abs();
+            if time_diff_now > 60 * 5 {
+                // Request date is not within the expected 5 minute tolerance window
+                // of the server time
+                return Ok(AwsErrorResponse(InvalidRequestException).into_response());
+            }
 
             let auth = match parse_auth_header(authorization) {
                 Ok(value) => value,
@@ -132,7 +186,7 @@ where
                 }
             };
 
-            let date_yyyymmdd = match credentials_parts.next() {
+            let _date_yyyymmdd = match credentials_parts.next() {
                 Some(value) => value,
                 None => {
                     return Ok(AwsErrorResponse(IncompleteSignature).into_response());
@@ -176,8 +230,7 @@ where
 
             let canonical_request = create_canonical_request(&auth.signed_headers, &parts, &body);
             let signature = aws_sig_v4(
-                date_yyyymmdd,
-                amz_date,
+                date,
                 region,
                 service,
                 &canonical_request,
